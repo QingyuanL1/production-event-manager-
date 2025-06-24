@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pkill:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(rm:*)"
+    ],
+    "deny": []
+  }
+}
