@@ -1,7 +1,7 @@
 import tkinter as tk
-from data_loader import DataLoader
+from data_loader import ProductionSchedulingApp
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = DataLoader(root)
+    app = ProductionSchedulingApp(root)
     root.mainloop() 
