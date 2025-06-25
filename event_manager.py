@@ -108,14 +108,10 @@ class EventManager:
                         {"name": "确认延期原因", "type": "dropdown", "source": "schedule_change_reasons"}
                     ],
                     "数量减少": [
-                        {"name": "输入减少数量", "type": "number", "validation": "positive_number"},
-                        {"name": "影响班次选择", "type": "dropdown", "source": "shift_count"},
-                        {"name": "减少原因说明", "type": "dropdown", "source": "quantity_change_reasons"}
+                        {"name": "输入减少数量", "type": "number", "validation": "positive_number"}
                     ],
                     "数量增加": [
-                        {"name": "输入增加数量", "type": "number", "validation": "positive_number"},
-                        {"name": "影响班次选择", "type": "dropdown", "source": "shift_count"},
-                        {"name": "增加原因说明", "type": "dropdown", "source": "quantity_change_reasons"}
+                        {"name": "输入增加数量", "type": "number", "validation": "positive_number"}
                     ],
                     "换PN": [
                         {"name": "选择需要操作的PN", "type": "dropdown", "source": "product_pn"},
