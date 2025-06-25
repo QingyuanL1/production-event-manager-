@@ -49,8 +49,7 @@ class EventManager:
                     {"name": "选择影响班次", "type": "dropdown", "source": "shifts"},
                     {"name": "选择产线", "type": "dropdown", "source": "production_lines"},
                     {"name": "确认产品PN", "type": "dropdown", "source": "product_pn"},
-                    {"name": "填入影响数量", "type": "number", "validation": "positive_number"},
-                    {"name": "输入具体数值", "type": "number", "validation": "positive_number"}
+                    {"name": "填入影响数量", "type": "number", "validation": "positive_number"}
                 ],
                 "description": "物料供应问题事件登记"
             },
@@ -65,15 +64,12 @@ class EventManager:
                     "全部取消": [],
                     "延期": [
                         {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
                     ],
                     "部分取消": [
                         {"name": "输入取消数量", "type": "number", "validation": "positive_number"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
                     ],
                     "提前": [
                         {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
                     ]
                 },
                 "description": "SBR生产信息变更事件登记"
@@ -83,10 +79,16 @@ class EventManager:
                     {"name": "选择影响日期", "type": "date", "source": "daily_plan_dates"},
                     {"name": "选择影响班次", "type": "dropdown", "source": "shifts"},
                     {"name": "选择产线", "type": "dropdown", "source": "production_lines"},
-                    {"name": "提前还是延期", "type": "dropdown", "source": "pm_operations"},
-                    {"name": "输入影响时间", "type": "number", "validation": "positive_number"},
-                    {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
+                    {"name": "提前还是延期", "type": "dropdown", "source": "pm_operations", "branches": True}
                 ],
+                "branches": {
+                    "提前": [
+                        {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"}
+                    ],
+                    "延期": [
+                        {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"}
+                    ]
+                },
                 "description": "设备维护状态变更事件登记"
             },
             "Drive loading计划": {
