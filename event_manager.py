@@ -99,13 +99,11 @@ class EventManager:
                 "branches": {
                     "日期提前": [
                         {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"},
-                        {"name": "影响班次数量", "type": "dropdown", "source": "shift_count"},
-                        {"name": "确认提前原因", "type": "dropdown", "source": "schedule_change_reasons"}
+                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
                     ],
                     "日期延期": [
                         {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"},
-                        {"name": "影响班次数量", "type": "dropdown", "source": "shift_count"},
-                        {"name": "确认延期原因", "type": "dropdown", "source": "schedule_change_reasons"}
+                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
                     ],
                     "数量减少": [
                         {"name": "输入减少数量", "type": "number", "validation": "positive_number"}
