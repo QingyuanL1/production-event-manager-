@@ -98,12 +98,10 @@ class EventManager:
                 ],
                 "branches": {
                     "日期提前": [
-                        {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
+                        {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"}
                     ],
                     "日期延期": [
-                        {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
+                        {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"}
                     ],
                     "数量减少": [
                         {"name": "输入减少数量", "type": "number", "validation": "positive_number"}
@@ -127,8 +125,8 @@ class EventManager:
             "sbr_operations": ["全部取消", "延期", "部分取消", "提前"],
             "pm_operations": ["提前", "延期"],
             "drive_operations": ["日期提前", "日期延期", "数量减少", "数量增加", "换PN"],
-            "delay_options": ["1班", "2班", "3班", "4班", "5班", "6班", "1周", "2周"],
-            "advance_options": ["1班", "2班", "3班", "4班", "5班", "6班", "1周", "2周"],
+            "delay_options": ["一个班", "两个班", "三个班"],
+            "advance_options": ["一个班", "两个班", "三个班"],
             "schedule_change_reasons": ["客户需求变更", "供应链调整", "产能优化", "设备维护", "紧急订单", "其他"],
             "quantity_change_reasons": ["市场需求变化", "物料供应问题", "产能调整", "客户取消订单", "库存调整", "其他"],
             "pn_change_scope": ["仅当前批次", "当日全部", "本周全部", "后续全部", "需要确认范围"]
