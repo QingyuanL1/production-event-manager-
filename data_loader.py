@@ -27,6 +27,7 @@ class DataLoader:
     def clean_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         清理DataFrame的列名，特别是处理时间格式的列名
+        统一将带有时间部分的列名格式化为纯日期格式 "YYYY-MM-DD"
         
         Args:
             df: 要清理列名的DataFrame
@@ -34,12 +35,23 @@ class DataLoader:
         Returns:
             清理后的DataFrame
         """
+        import datetime
+        
         new_columns = []
         for col in df.columns:
-            # 如果是字符串且形如 '2025-03-02 00:00:00.1'，则提取日期部分
-            if isinstance(col, str) and re.match(r'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+', col):
-                date_part = col.split(' ')[0]  # 提取日期部分
-                new_columns.append(date_part)
+            # 处理datetime对象
+            if isinstance(col, datetime.datetime):
+                # 格式化为 YYYY-MM-DD
+                new_columns.append(col.strftime('%Y-%m-%d'))
+            # 处理字符串格式的日期时间
+            elif isinstance(col, str):
+                # 匹配各种时间格式：
+                # '2025-03-02 00:00:00.1', '2025-03-02 00:00:00', '2025-03-02T00:00:00' 等
+                if re.match(r'\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}:\d{2}', col):
+                    date_part = col.split(' ')[0].split('T')[0]  # 提取日期部分
+                    new_columns.append(date_part)
+                else:
+                    new_columns.append(col)
             else:
                 new_columns.append(col)
         
@@ -168,15 +180,29 @@ class DataLoader:
         Returns:
             sheet名称列表
         """
-        if data_type == "HSA Daily Plan":
-            return ["Sheet1", "Sheet1 (2)"]
-        elif data_type == "HSA FG EOH":
-            return ["HSA EOH"]
-        elif data_type == "HSA Capacity":
-            return ["LCA", "Manual", "Special HSA PN", "Minimum packaging"]
-        elif data_type == "Learning Curve":
-            return ["Learning curve (2)", "Learning curve for conversion", "Learning curve for shutdown"]
-        return []
+        if data_type not in self.file_paths:
+            return []
+            
+        file_path = self.file_paths[data_type]
+        if not os.path.exists(file_path):
+            return []
+            
+        try:
+            # 动态获取Excel文件的所有sheet名称
+            xlsx = pd.ExcelFile(file_path)
+            return xlsx.sheet_names
+        except Exception as e:
+            print(f"Error getting sheet names for {data_type}: {e}")
+            # 如果获取失败，使用备用的硬编码名称
+            if data_type == "HSA Daily Plan":
+                return ["Sheet1", "Sheet1 (2)"]
+            elif data_type == "HSA FG EOH":
+                return ["HSA EOH"]
+            elif data_type == "HSA Capacity":
+                return ["LCA", "Manual", "Special HSA PN", "Minimum packaging"]
+            elif data_type == "Learning Curve":
+                return ["Learning curve (2)", "Learning curve for conversion", "Learning curve for shutdown"]
+            return []
         
     def get_data(self, data_type: str) -> Optional[pd.DataFrame]:
         """
@@ -202,35 +228,52 @@ class DataLoader:
             DataFrame if data is loaded, None otherwise
         """
         if data_type == "HSA Daily Plan":
-            if sheet_name == "Sheet1":
+            # 为每个sheet生成唯一的存储键
+            sheet_key = f"{data_type}_{sheet_name.replace(' ', '_').replace('(', '').replace(')', '')}"
+            
+            # 如果是第一个sheet且已经加载过，直接返回
+            if sheet_name == "Sheet1" and data_type in self.data:
                 return self.get_data(data_type)
-            elif sheet_name == "Sheet1 (2)":
-                # 如果Sheet1 (2)的数据尚未加载，则加载它
-                if f"{data_type}_Sheet2" not in self.data:
-                    file_path = self.file_paths[data_type]
-                    try:
-                        df = pd.read_excel(file_path, sheet_name=1)  # 使用索引1加载第二个sheet
+            
+            # 如果这个sheet的数据尚未加载，则加载它
+            if sheet_key not in self.data:
+                file_path = self.file_paths[data_type]
+                try:
+                    df = pd.read_excel(file_path, sheet_name=sheet_name)
+                    
+                    # 清理列名 - 统一格式化时间列名
+                    df = self.clean_column_names(df)
+                    
+                    # 提取表头数据（前3行）
+                    headers = df.iloc[:3].copy()
+                    
+                    # 提取数据行（从第4行开始）
+                    data_rows = df.iloc[3:].copy()
+                    
+                    # 处理前3列的ID信息
+                    id_columns = data_rows.iloc[:, :3].copy()
+                    id_columns.iloc[:, 0] = id_columns.iloc[:, 0].ffill()  # 对第一列（通常是Line列）进行前向填充
+                    
+                    # 数值数据部分
+                    value_columns = data_rows.iloc[:, 3:].copy()
+                    
+                    # 重新组合数据
+                    processed_data = pd.concat([id_columns, value_columns], axis=1)
+                    
+                    # 保存处理后的数据和表头
+                    self.data[sheet_key] = processed_data
+                    self.data[f"{sheet_key}_headers"] = headers
+                    
+                    # 如果是第一个sheet，也保存到默认位置
+                    if sheet_name == "Sheet1":
+                        self.data[data_type] = processed_data
+                        self.data[f"{data_type}_headers"] = headers
                         
-                        # 清理列名
-                        df = self.clean_column_names(df)
-                        
-                        headers = df.iloc[:3].copy()
-                        data_rows = df.iloc[3:].copy()
-                        
-                        id_columns = data_rows.iloc[:, :3].copy()
-                        id_columns['Line'] = id_columns['Line'].ffill()
-                        
-                        value_columns = data_rows.iloc[:, 3:].copy()
-                        
-                        processed_data = pd.concat([id_columns, value_columns], axis=1)
-                        
-                        self.data[f"{data_type}_Sheet2"] = processed_data
-                        self.data[f"{data_type}_Sheet2_headers"] = headers
-                    except Exception as e:
-                        print(f"Error loading Sheet1 (2): {e}")
-                        return None
-                
-                return self.data.get(f"{data_type}_Sheet2")
+                except Exception as e:
+                    print(f"Error loading {sheet_name}: {e}")
+                    return None
+            
+            return self.data.get(sheet_key)
         
         return self.get_data(data_type)
     
@@ -261,12 +304,16 @@ class DataLoader:
             DataFrame containing headers if available, None otherwise
         """
         if data_type == "HSA Daily Plan":
-            if sheet_name == "Sheet1":
+            # 生成对应的sheet键
+            sheet_key = f"{data_type}_{sheet_name.replace(' ', '_').replace('(', '').replace(')', '')}"
+            
+            # 如果是第一个sheet且已经加载过
+            if sheet_name == "Sheet1" and f"{data_type}_headers" in self.data:
                 return self.get_headers(data_type)
-            elif sheet_name == "Sheet1 (2)":
-                # 确保数据已加载
-                self.get_data_for_sheet(data_type, sheet_name)
-                return self.data.get(f"{data_type}_Sheet2_headers")
+            
+            # 确保数据已加载
+            self.get_data_for_sheet(data_type, sheet_name)
+            return self.data.get(f"{sheet_key}_headers")
         
         return self.get_headers(data_type)
         
