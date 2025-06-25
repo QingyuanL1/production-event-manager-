@@ -38,6 +38,7 @@ python explore_data.py
    - Implements tabbed interface with Control Panel, Data Preview, Event Management, and Result Analysis
    - Handles UI threading for data loading to prevent freezing
    - Manages system logging and status updates
+   - Integrates event management functionality
 
 2. **data_loader.py** - Data loading and processing module
    - Contains `DataLoader` class for loading Excel files from `数据表/` directory
@@ -46,7 +47,21 @@ python explore_data.py
    - Performs selective forward-filling for specific columns (not global)
    - Cleans column names, especially datetime formats
 
-3. **explore_data.py** - Development utility for examining Excel file structure
+3. **event_manager.py** - Event management core logic
+   - Contains `EventManager` class for handling production events
+   - Supports five event types: LCA产量损失, 物料情况, SBR信息, PM状态, Drive loading计划
+   - Implements multi-level cascading data validation
+   - Provides data source integration with Daily Plan and other production data
+   - Handles event persistence and export functionality
+
+4. **event_ui.py** - Event management user interface
+   - Contains `EventFormUI` class for dynamic multi-level form generation
+   - Supports up to 7-level cascading dropdown/input forms
+   - Implements branch logic for complex event types (SBR, Drive loading)
+   - Provides real-time validation and data consistency checks
+   - Includes event list management and export features
+
+5. **explore_data.py** - Development utility for examining Excel file structure
 
 ### Data Sources
 
@@ -83,10 +98,13 @@ The system works with Excel files in the `数据表/` directory:
 ### Current Implementation Status
 
 - ✅ Data loading and preview functionality
-- ❌ Event management (placeholder)
+- ✅ Event management system with multi-level cascading forms
+- ✅ Five event types with full 7-level input support
+- ✅ Data validation and logical consistency checks
+- ✅ Event export functionality
 - ❌ Result analysis (placeholder)
 - ❌ Event processing algorithms
-- ❌ Export functionality
+- ❌ Production plan adjustment logic
 
 ## Development Guidelines
 

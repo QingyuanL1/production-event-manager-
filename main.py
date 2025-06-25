@@ -6,6 +6,8 @@ import threading
 import time
 import datetime
 from data_loader import DataLoader
+from event_manager import EventManager
+from event_ui import EventFormUI
 
 class ProductionSchedulingSystem:
     """
@@ -25,6 +27,9 @@ class ProductionSchedulingSystem:
         
         # Data loader
         self.data_loader = DataLoader()
+        
+        # Event manager
+        self.event_manager = EventManager(self.data_loader, self.log_message)
         
         # Currently selected data type
         self.current_data_type = tk.StringVar()
@@ -132,26 +137,29 @@ class ProductionSchedulingSystem:
         ttk.Separator(left_panel, orient='horizontal').pack(fill=tk.X, pady=15)
         
         # Event management buttons
-        generate_events_btn = ttk.Button(
+        create_event_btn = ttk.Button(
             left_panel, 
-            text="生成事件表", 
+            text="创建新事件", 
+            command=self.switch_to_event_tab,
             **button_style
         )
-        generate_events_btn.pack(pady=5, anchor=tk.W)
+        create_event_btn.pack(pady=5, anchor=tk.W)
         
-        process_events_btn = ttk.Button(
+        view_events_btn = ttk.Button(
             left_panel, 
-            text="处理事件", 
+            text="查看事件列表", 
+            command=self.view_events,
             **button_style
         )
-        process_events_btn.pack(pady=5, anchor=tk.W)
+        view_events_btn.pack(pady=5, anchor=tk.W)
         
-        export_results_btn = ttk.Button(
+        export_events_btn = ttk.Button(
             left_panel, 
-            text="导出结果", 
+            text="导出事件", 
+            command=self.export_events,
             **button_style
         )
-        export_results_btn.pack(pady=5, anchor=tk.W)
+        export_events_btn.pack(pady=5, anchor=tk.W)
         
         # Separator
         ttk.Separator(left_panel, orient='horizontal').pack(fill=tk.X, pady=15)
@@ -253,12 +261,12 @@ class ProductionSchedulingSystem:
         """
         Set up the event management tab.
         """
-        # Placeholder for event management tab
-        ttk.Label(
+        # 创建事件管理UI
+        self.event_form_ui = EventFormUI(
             self.event_management_tab, 
-            text="事件管理功能将在后续实现", 
-            font=("Arial", 14)
-        ).pack(pady=50)
+            self.event_manager, 
+            self.log_message
+        )
         
     def setup_result_analysis(self):
         """
@@ -518,6 +526,16 @@ class ProductionSchedulingSystem:
             data = self.data_loader.get_data(data_type)
             status = "已加载" if data is not None else "未加载"
             status_info.append(f"  - {data_type}: {status}")
+        
+        # Add event management information
+        status_info.append("")
+        status_info.append("事件管理状态:")
+        if hasattr(self, 'event_manager'):
+            event_count = len(self.event_manager.get_events())
+            status_info.append(f"  - 已创建事件数量: {event_count}")
+            status_info.append(f"  - 事件管理器: 已初始化")
+        else:
+            status_info.append("  - 事件管理器: 未初始化")
             
         # Add the status information to the text widget
         self.status_text.insert(tk.END, "\n".join(status_info))
@@ -557,6 +575,32 @@ class ProductionSchedulingSystem:
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
         self.log_message("INFO", "日志已清空")
+    
+    def switch_to_event_tab(self):
+        """
+        Switch to the event management tab.
+        """
+        self.notebook.select(self.event_management_tab)
+        self.log_message("INFO", "切换到事件管理页面")
+    
+    def view_events(self):
+        """
+        View events and switch to event management tab.
+        """
+        self.switch_to_event_tab()
+        # 刷新事件列表
+        if hasattr(self, 'event_form_ui'):
+            self.event_form_ui.refresh_event_list()
+        self.log_message("INFO", "查看事件列表")
+    
+    def export_events(self):
+        """
+        Export events to Excel file.
+        """
+        if hasattr(self, 'event_form_ui'):
+            self.event_form_ui.export_events()
+        else:
+            messagebox.showwarning("导出失败", "事件管理功能尚未初始化")
 
 
 if __name__ == "__main__":
