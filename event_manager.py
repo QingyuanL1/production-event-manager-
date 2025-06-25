@@ -99,21 +99,28 @@ class EventManager:
                 "branches": {
                     "日期提前": [
                         {"name": "选择提前时间", "type": "dropdown", "source": "advance_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
+                        {"name": "影响班次数量", "type": "dropdown", "source": "shift_count"},
+                        {"name": "确认提前原因", "type": "dropdown", "source": "schedule_change_reasons"}
                     ],
                     "日期延期": [
                         {"name": "选择延期时间", "type": "dropdown", "source": "delay_options"},
-                        {"name": "班次选择", "type": "dropdown", "source": "shift_count"}
+                        {"name": "影响班次数量", "type": "dropdown", "source": "shift_count"},
+                        {"name": "确认延期原因", "type": "dropdown", "source": "schedule_change_reasons"}
                     ],
                     "数量减少": [
-                        {"name": "输入减少数量", "type": "number", "validation": "positive_number"}
+                        {"name": "输入减少数量", "type": "number", "validation": "positive_number"},
+                        {"name": "影响班次选择", "type": "dropdown", "source": "shift_count"},
+                        {"name": "减少原因说明", "type": "dropdown", "source": "quantity_change_reasons"}
                     ],
                     "数量增加": [
-                        {"name": "输入增加数量", "type": "number", "validation": "positive_number"}
+                        {"name": "输入增加数量", "type": "number", "validation": "positive_number"},
+                        {"name": "影响班次选择", "type": "dropdown", "source": "shift_count"},
+                        {"name": "增加原因说明", "type": "dropdown", "source": "quantity_change_reasons"}
                     ],
                     "换PN": [
                         {"name": "选择需要操作的PN", "type": "dropdown", "source": "product_pn"},
-                        {"name": "选择需要转换的PN", "type": "dropdown", "source": "product_pn"}
+                        {"name": "选择需要转换的PN", "type": "dropdown", "source": "product_pn"},
+                        {"name": "确认换PN影响范围", "type": "dropdown", "source": "pn_change_scope"}
                     ]
                 },
                 "description": "Drive loading计划调整事件登记"
@@ -123,12 +130,15 @@ class EventManager:
         # 数据源选项定义
         self.data_sources = {
             "shifts": ["T1", "T2", "T3", "T4", "Day", "Night"],
-            "shift_count": ["一个班", "两个班", "三个班"],
+            "shift_count": ["一个班", "两个班", "三个班", "全部班次"],
             "sbr_operations": ["全部取消", "延期", "部分取消", "提前"],
             "pm_operations": ["提前", "延期"],
             "drive_operations": ["日期提前", "日期延期", "数量减少", "数量增加", "换PN"],
-            "delay_options": ["1小时", "2小时", "4小时", "8小时", "12小时", "1天", "2天", "3天"],
-            "advance_options": ["1小时", "2小时", "4小时", "8小时", "12小时", "1天", "2天", "3天"]
+            "delay_options": ["1小时", "2小时", "4小时", "8小时", "12小时", "1天", "2天", "3天", "1周"],
+            "advance_options": ["1小时", "2小时", "4小时", "8小时", "12小时", "1天", "2天", "3天", "1周"],
+            "schedule_change_reasons": ["客户需求变更", "供应链调整", "产能优化", "设备维护", "紧急订单", "其他"],
+            "quantity_change_reasons": ["市场需求变化", "物料供应问题", "产能调整", "客户取消订单", "库存调整", "其他"],
+            "pn_change_scope": ["仅当前批次", "当日全部", "本周全部", "后续全部", "需要确认范围"]
         }
         
     def log_message(self, level: str, message: str):
