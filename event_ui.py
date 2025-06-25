@@ -336,14 +336,18 @@ class EventFormUI:
                                   font=("Arial", 10, "bold"), foreground="purple")
             title_label.pack(anchor=tk.W, pady=(0, 10))
             
-            # 分支字段使用网格布局
+            # 分支字段使用pack布局（避免与之前的pack冲突）
             for i, branch_config in enumerate(branch_configs):
                 field_name = branch_config["name"]
                 field_type = branch_config["type"]
                 
+                # 创建字段框架
+                field_frame = ttk.Frame(self.branch_fields_frame)
+                field_frame.pack(fill=tk.X, pady=5)
+                
                 # 标签
-                label = ttk.Label(self.branch_fields_frame, text=f"{field_name}:", font=("Arial", 10))
-                label.grid(row=i, column=0, sticky=tk.W, padx=(0, 15), pady=8)
+                label = ttk.Label(field_frame, text=f"{field_name}:", font=("Arial", 10))
+                label.pack(side=tk.LEFT, padx=(0, 15))
                 
                 # 输入组件
                 if field_type == "dropdown":
@@ -352,37 +356,29 @@ class EventFormUI:
                     
                     options = self.event_manager.get_data_source_options(branch_config["source"], {})
                     combo = ttk.Combobox(
-                        self.branch_fields_frame,
+                        field_frame,
                         textvariable=var,
                         values=options,
                         state="readonly",
                         width=30,
                         font=("Arial", 10)
                     )
-                    combo.grid(row=i, column=1, sticky=tk.W+tk.E, padx=(0, 15), pady=8)
+                    combo.pack(side=tk.LEFT, padx=(0, 15))
                     self.form_widgets[field_name] = combo
-                    
-                    # 空的提示列
-                    ttk.Label(self.branch_fields_frame, text="").grid(row=i, column=2, sticky=tk.W)
                     
                 elif field_type == "number":
                     var = tk.StringVar()
                     self.form_variables[field_name] = var
                     
-                    entry = ttk.Entry(self.branch_fields_frame, textvariable=var, width=30, font=("Arial", 10))
-                    entry.grid(row=i, column=1, sticky=tk.W+tk.E, padx=(0, 15), pady=8)
+                    entry = ttk.Entry(field_frame, textvariable=var, width=30, font=("Arial", 10))
+                    entry.pack(side=tk.LEFT, padx=(0, 15))
                     self.form_widgets[field_name] = entry
                     
                     # 验证提示
                     if "validation" in branch_config:
-                        hint_label = ttk.Label(self.branch_fields_frame, text="请输入正数", 
+                        hint_label = ttk.Label(field_frame, text="请输入正数", 
                                              font=("Arial", 9), foreground="gray")
-                        hint_label.grid(row=i, column=2, sticky=tk.W)
-                    else:
-                        ttk.Label(self.branch_fields_frame, text="").grid(row=i, column=2, sticky=tk.W)
-            
-            # 配置分支字段的列权重
-            self.branch_fields_frame.columnconfigure(1, weight=1)
+                        hint_label.pack(side=tk.LEFT, padx=(10, 0))
     
     def on_field_changed(self, event=None):
         """当字段值改变时，更新相关联的字段选项"""
