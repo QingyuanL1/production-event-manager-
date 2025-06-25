@@ -119,8 +119,7 @@ class EventManager:
                     ],
                     "换PN": [
                         {"name": "选择需要操作的PN", "type": "dropdown", "source": "product_pn"},
-                        {"name": "选择需要转换的PN", "type": "dropdown", "source": "product_pn"},
-                        {"name": "确认换PN影响范围", "type": "dropdown", "source": "pn_change_scope"}
+                        {"name": "选择需要转换的PN", "type": "dropdown", "source": "product_pn"}
                     ]
                 },
                 "description": "Drive loading计划调整事件登记"
