@@ -237,7 +237,7 @@ class ProductionSchedulingSystem:
         # Configure tag for alternating row colors (zebra stripes) and header style
         self.data_tree.tag_configure('oddrow', background='#f0f0f0')
         self.data_tree.tag_configure('evenrow', background='white')
-        self.data_tree.tag_configure('header', background='#e0e8f0', font=('Arial', 9, 'bold'))
+        self.data_tree.tag_configure('header', font=('Arial', 9, 'bold'))
         
         # Scrollbars for the treeview
         y_scrollbar = ttk.Scrollbar(data_frame, orient=tk.VERTICAL, command=self.data_tree.yview)
@@ -365,6 +365,10 @@ class ProductionSchedulingSystem:
         # 如果没有选择数据类型或工作表，返回None
         if not data_type:
             return None
+        
+        # 对于HSA Daily Plan，使用sheet感知的数据获取方法
+        if data_type == "HSA Daily Plan":
+            return self.data_loader.get_data_for_sheet(data_type, sheet)
             
         # 获取基本数据
         data = self.data_loader.get_data(data_type)
@@ -417,11 +421,12 @@ class ProductionSchedulingSystem:
             self.data_tree.delete(item)
         
         data_type = self.current_data_type.get()
+        sheet = self.current_sheet.get()
         
         # 处理Daily Plan的特殊情况，其有独立的表头
         headers = None
         if data_type == "HSA Daily Plan":
-            headers = self.data_loader.get_headers(data_type)
+            headers = self.data_loader.get_headers_for_sheet(data_type, sheet)
             
         # 制作数据的工作副本，避免修改原始数据
         # 不再使用全局前向填充，而是有选择地处理每种数据类型
@@ -435,9 +440,20 @@ class ProductionSchedulingSystem:
         for col in data.columns:
             # Limit column width for better display
             display_text = str(col)
-            # Handle datetime column names
+            
+            # Handle datetime column names and remove time part if it's 00:00:00
             if isinstance(col, datetime.datetime):
-                display_text = col.strftime('%Y-%m-%d')
+                # 检查是否是标准日期格式（时间部分为00:00:00）
+                if col.hour == 0 and col.minute == 0 and col.second == 0:
+                    display_text = col.strftime('%Y-%m-%d')
+                # 检查是否是类似 2025-03-02 00:00:00.1 格式
+                elif str(col).endswith('00:00:00.1') or '.1' in str(col):
+                    # 提取日期部分
+                    date_part = col.strftime('%Y-%m-%d')
+                    # 如果是类似带小数的时间部分，保留特殊标记（如T4）
+                    display_text = date_part
+                else:
+                    display_text = col.strftime('%Y-%m-%d')
                 
             col_width = min(150, max(50, len(display_text) * 10))
             self.data_tree.column(col, width=col_width, anchor='w')
