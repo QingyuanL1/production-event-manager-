@@ -8,7 +8,7 @@ class DataLoader:
     Class for loading and processing Excel data files for the production scheduling system.
     """
     
-    def __init__(self, data_dir: str = "数据表"):
+    def __init__(self, data_dir: str = "data"):
         """
         Initialize the DataLoader with the directory containing data files.
         

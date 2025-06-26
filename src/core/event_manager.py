@@ -37,9 +37,8 @@ class EventManager:
                     {"name": "选择影响日期", "type": "date", "source": "daily_plan_dates"},
                     {"name": "选择产线", "type": "dropdown", "source": "production_lines"},
                     {"name": "确认产品PN", "type": "dropdown", "source": "product_pn"},
-                    {"name": "填入已经损失的产量", "type": "number", "validation": "positive_number"},
-                    {"name": "填入剩余修理时间", "type": "number", "validation": "positive_number"},
-                    {"name": "输入XX小时", "type": "number", "validation": "positive_number"}
+                    {"name": "已经损失的产量", "type": "number", "validation": "positive_number"},
+                    {"name": "剩余修理时间", "type": "number", "validation": "positive_number"},
                 ],
                 "description": "LCA产线产量损失事件登记"
             },
