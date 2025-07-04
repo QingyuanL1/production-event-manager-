@@ -15,12 +15,12 @@ python main.py
 
 ### Installing Dependencies
 ```bash
-pip install -r requirements.txt
+pip install -r config/requirements.txt
 ```
 
 ### Data Exploration (for development)
 ```bash
-python explore_data.py
+python src/utils/explore_data.py
 ```
 
 ## Dependencies
@@ -61,7 +61,14 @@ python explore_data.py
    - Provides real-time validation and data consistency checks
    - Includes event list management and export features
 
-5. **explore_data.py** - Development utility for examining Excel file structure
+5. **event_processor.py** - Core business logic for processing production events
+   - Contains `EventProcessor` class that implements the actual event processing algorithms
+   - Handles five event types: LCA产能损失, 物料情况, SBR信息, PM状态, Drive loading计划
+   - Implements specific sub-processing for Drive Loading events (date advance/delay, quantity changes, PN changes)
+   - Provides result export functionality
+   - Integrates with data_loader for accessing production data
+
+6. **explore_data.py** - Development utility for examining Excel file structure
 
 ### Data Sources
 
@@ -102,9 +109,12 @@ The system works with Excel files in the `数据表/` directory:
 - ✅ Five event types with full 7-level input support
 - ✅ Data validation and logical consistency checks
 - ✅ Event export functionality
+- ✅ Event processing framework with EventProcessor class
+- ✅ Basic event processing logic for all event types
+- ⚠️ Event processing algorithms (framework complete, business logic partially implemented)
 - ❌ Result analysis (placeholder)
-- ❌ Event processing algorithms
 - ❌ Production plan adjustment logic
+- ❌ Capacity calculation and optimization algorithms
 
 ## Development Guidelines
 
