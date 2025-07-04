@@ -418,6 +418,10 @@ class EventManager:
         
         if success:
             self.log_message("SUCCESS", f"事件创建成功: {event_data.get('事件ID', 'Unknown')} - {event_data.get('事件类型', 'Unknown')}")
+            
+            # 如果是LCA产能损失事件，自动执行处理逻辑
+            if event_data.get("事件类型") == "LCA产能损失":
+                self._execute_lca_processing(event_data)
         
         return success, message
     
@@ -470,6 +474,53 @@ class EventManager:
             
         except Exception as e:
             self.log_message("ERROR", f"增强LCA事件数据时出错: {str(e)}")
+    
+    def _execute_lca_processing(self, event_data: Dict) -> None:
+        """
+        执行LCA产能损失处理逻辑
+        
+        Args:
+            event_data: 事件数据字典
+        """
+        try:
+            self.log_message("INFO", "开始执行LCA产能损失处理逻辑...")
+            
+            # 创建LCA处理器并执行处理
+            from .lca_capacity_loss import LCACapacityLossProcessor
+            
+            # 创建LCA处理器，使用适配器传递日志
+            lca_processor = LCACapacityLossProcessor(self.data_loader, self._create_logger())
+            
+            # 执行LCA处理逻辑
+            result = lca_processor.process_lca_capacity_loss(event_data)
+            
+            # 输出处理结果
+            if result["status"] == "add_line_required":
+                self.log_message("WARNING", f"🏭 {result['message']}")
+                self.log_message("INFO", f"📊 累计损失: {result.get('check_result', {}).get('total_loss', 0):.0f}")
+            elif result["status"] == "normal_process":
+                self.log_message("INFO", f"ℹ️  {result['message']}")
+            elif result["status"] == "error":
+                self.log_message("ERROR", f"❌ LCA处理失败: {result['message']}")
+            
+            # 保存处理结果到数据库（移除不可序列化的对象）
+            result_copy = result.copy()
+            if 'check_result' in result_copy and 'previous_shifts' in result_copy['check_result']:
+                # 移除datetime对象，只保留日期字符串
+                for shift in result_copy['check_result']['previous_shifts']:
+                    if 'datetime' in shift:
+                        del shift['datetime']
+            
+            self.db_manager.save_processing_result(
+                event_data.get("事件ID", ""),
+                "LCA产能损失检查",
+                result_copy,
+                result["status"]
+            )
+            
+        except Exception as e:
+            error_msg = f"执行LCA处理逻辑时发生错误: {str(e)}"
+            self.log_message("ERROR", error_msg)
     
     def get_database_stats(self) -> Dict[str, Any]:
         """获取数据库统计信息"""
