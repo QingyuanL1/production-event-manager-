@@ -28,9 +28,6 @@ class ProductionSchedulingSystem:
         # Data loader
         self.data_loader = DataLoader()
         
-        # Event manager
-        self.event_manager = EventManager(self.data_loader, self.log_message)
-        
         # Currently selected data type
         self.current_data_type = tk.StringVar()
         
@@ -40,8 +37,14 @@ class ProductionSchedulingSystem:
         # Currently selected sheet
         self.current_sheet = tk.StringVar()
         
-        # Build the UI
+        # Build the UI first
         self.setup_ui()
+        
+        # Initialize Event manager after UI is set up
+        self.event_manager = EventManager(self.data_loader, self.log_message)
+        
+        # Create the actual event management UI now that event_manager is ready
+        self.setup_event_management_ui()
         
         # Initialize system log
         self.log_message("INFO", "系统初始化完成")
@@ -261,7 +264,22 @@ class ProductionSchedulingSystem:
         """
         Set up the event management tab.
         """
-        # 创建事件管理UI
+        # 暂时创建一个占位符，实际的事件管理UI会在event_manager初始化后创建
+        ttk.Label(
+            self.event_management_tab, 
+            text="事件管理界面初始化中...", 
+            font=("Arial", 14)
+        ).pack(pady=50)
+    
+    def setup_event_management_ui(self):
+        """
+        Create the actual event management UI after event_manager is initialized.
+        """
+        # Clear the placeholder
+        for widget in self.event_management_tab.winfo_children():
+            widget.destroy()
+        
+        # Create the real event management UI
         self.event_form_ui = EventFormUI(
             self.event_management_tab, 
             self.event_manager, 

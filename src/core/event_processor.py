@@ -7,6 +7,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 import logging
+from .lca_capacity_loss import LCACapacityLossProcessor
 
 class EventProcessor:
     """
@@ -27,6 +28,9 @@ class EventProcessor:
         self.current_plan = None
         self.processing_results = []
         
+        # 初始化LCA产能损失处理器
+        self.lca_processor = LCACapacityLossProcessor(data_loader, logger)
+        
     def process_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         处理单个事件
@@ -42,7 +46,7 @@ class EventProcessor:
         
         try:
             if event_type == "LCA产能损失":
-                return self._process_lca_capacity_loss(event_data)
+                return self.lca_processor.process_lca_capacity_loss(event_data)
             elif event_type == "物料情况":
                 return self._process_material_issue(event_data)
             elif event_type == "SBR信息":

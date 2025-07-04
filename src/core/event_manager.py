@@ -4,6 +4,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 import re
+import os
+import json
 
 class EventManager:
     """
@@ -22,8 +24,18 @@ class EventManager:
         self.data_loader = data_loader
         self.log_callback = log_callback
         
+        # 事件存储文件路径
+        self.events_file = "data/events.json"
+        self.events_backup_file = "data/events_backup.json"
+        
+        # 确保数据目录存在
+        os.makedirs("data", exist_ok=True)
+        
         # 事件存储列表
         self.events = []
+        
+        # 加载已保存的事件
+        self.load_events()
         
         # 当前事件录入状态
         self.current_event = {}
@@ -392,6 +404,9 @@ class EventManager:
         # 保存事件
         self.events.append(event_data.copy())
         
+        # 持久化保存事件
+        self.save_events()
+        
         self.log_message("SUCCESS", f"事件创建成功: {event_data['事件ID']} - {event_data.get('事件类型', 'Unknown')}")
         
         return True, f"事件 {event_data['事件ID']} 创建成功"
@@ -405,6 +420,8 @@ class EventManager:
         for i, event in enumerate(self.events):
             if event.get("事件ID") == event_id:
                 del self.events[i]
+                # 持久化保存删除后的事件列表
+                self.save_events()
                 self.log_message("INFO", f"事件已删除: {event_id}")
                 return True
         return False
@@ -421,4 +438,97 @@ class EventManager:
             return True
         except Exception as e:
             self.log_message("ERROR", f"导出事件时出错: {str(e)}")
+            return False
+    
+    def save_events(self) -> bool:
+        """
+        保存事件到JSON文件
+        
+        Returns:
+            bool: 保存是否成功
+        """
+        try:
+            # 创建备份文件
+            if os.path.exists(self.events_file):
+                try:
+                    with open(self.events_file, 'r', encoding='utf-8') as f:
+                        backup_data = json.load(f)
+                    with open(self.events_backup_file, 'w', encoding='utf-8') as f:
+                        json.dump(backup_data, f, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    self.log_message("WARNING", f"创建备份文件时出错: {str(e)}")
+            
+            # 保存当前事件数据
+            with open(self.events_file, 'w', encoding='utf-8') as f:
+                json.dump(self.events, f, ensure_ascii=False, indent=2)
+            
+            self.log_message("INFO", f"事件数据已保存到: {self.events_file}")
+            return True
+            
+        except Exception as e:
+            self.log_message("ERROR", f"保存事件数据时出错: {str(e)}")
+            return False
+    
+    def load_events(self) -> bool:
+        """
+        从JSON文件加载事件
+        
+        Returns:
+            bool: 加载是否成功
+        """
+        try:
+            if not os.path.exists(self.events_file):
+                self.log_message("INFO", "事件文件不存在，使用空事件列表")
+                return True
+            
+            with open(self.events_file, 'r', encoding='utf-8') as f:
+                self.events = json.load(f)
+            
+            self.log_message("INFO", f"已加载 {len(self.events)} 个事件")
+            return True
+            
+        except Exception as e:
+            self.log_message("ERROR", f"加载事件数据时出错: {str(e)}")
+            
+            # 尝试从备份文件恢复
+            if os.path.exists(self.events_backup_file):
+                try:
+                    with open(self.events_backup_file, 'r', encoding='utf-8') as f:
+                        self.events = json.load(f)
+                    self.log_message("INFO", f"从备份文件恢复了 {len(self.events)} 个事件")
+                    return True
+                except Exception as backup_e:
+                    self.log_message("ERROR", f"从备份文件恢复时出错: {str(backup_e)}")
+            
+            # 如果都失败了，使用空列表
+            self.events = []
+            return False
+    
+    def clear_all_events(self) -> bool:
+        """
+        清空所有事件（需要确认操作）
+        
+        Returns:
+            bool: 清空是否成功
+        """
+        try:
+            # 先备份当前数据
+            if self.events:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_file = f"data/events_clear_backup_{timestamp}.json"
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.events, f, ensure_ascii=False, indent=2)
+                self.log_message("INFO", f"清空前数据已备份到: {backup_file}")
+            
+            # 清空事件列表
+            self.events = []
+            
+            # 保存空列表
+            self.save_events()
+            
+            self.log_message("SUCCESS", "所有事件已清空")
+            return True
+            
+        except Exception as e:
+            self.log_message("ERROR", f"清空事件时出错: {str(e)}")
             return False
