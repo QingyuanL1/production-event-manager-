@@ -40,14 +40,25 @@ class LCACapacityLossProcessor:
         Returns:
             处理结果字典
         """
-        self.logger.info("开始处理LCA产能损失事件")
+        self.logger.info("=" * 60)
+        self.logger.info("🚀 开始处理LCA产能损失事件")
+        self.logger.info(f"📋 当前事件信息: 日期={event_data.get('选择影响日期')}, 班次={event_data.get('选择影响班次')}, 产线={event_data.get('选择产线')}")
         
         try:
             # 第一步：检查前3个班次都有报告损失，且累计损失超过10K
+            self.logger.info("🔍 步骤1: 开始检查前3个班次的损失情况...")
             check_result = self._check_previous_shifts_loss(event_data)
             
+            self.logger.info(f"📊 检查结果统计:")
+            self.logger.info(f"   - 检查班次数: {check_result.get('shifts_checked', 0)}")
+            self.logger.info(f"   - 有损失班次: {check_result.get('shifts_with_loss', 0)}")
+            self.logger.info(f"   - 累计损失: {check_result.get('total_loss', 0):.0f}")
+            self.logger.info(f"   - 所有班次都有损失: {check_result.get('all_shifts_have_loss', False)}")
+            self.logger.info(f"   - 损失超过10K: {check_result.get('total_exceeds_10k', False)}")
+            
             if check_result["has_sufficient_loss"]:
-                self.logger.info("前3个班次累计损失超过10K，建议加线")
+                self.logger.info("✅ 判定结果: 前3个班次累计损失超过10K，建议加线")
+                self.logger.info("🏭 输出建议: 产线状况不佳，考虑加线")
                 return {
                     "status": "add_line_required",
                     "message": "产线状况不佳，考虑加线",
@@ -57,7 +68,8 @@ class LCACapacityLossProcessor:
                     "event_data": event_data
                 }
             else:
-                self.logger.info("前3个班次损失未达到加线条件，继续正常流程")
+                self.logger.info("ℹ️  判定结果: 未达到加线条件，继续正常流程")
+                self.logger.info(f"📝 原因: {check_result.get('reason', '未知')}")
                 return {
                     "status": "normal_process",
                     "message": "损失在正常范围内，按标准流程处理",
@@ -69,12 +81,14 @@ class LCACapacityLossProcessor:
             
         except Exception as e:
             error_msg = f"处理LCA产能损失事件失败: {str(e)}"
-            self.logger.error(error_msg)
+            self.logger.error(f"❌ {error_msg}")
             return {
                 "status": "error",
                 "message": error_msg,
                 "event_data": event_data
             }
+        finally:
+            self.logger.info("=" * 60)
     
     def _check_previous_shifts_loss(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -114,17 +128,25 @@ class LCACapacityLossProcessor:
             
             # 获取前3个班次的信息
             previous_shifts = self._get_previous_3_shifts(current_date, current_shift)
-            self.logger.info(f"前3个班次: {previous_shifts}")
+            self.logger.info(f"📅 计算得出前3个班次:")
+            for i, shift in enumerate(previous_shifts, 1):
+                self.logger.info(f"   {i}. {shift['date']} {shift['shift']}")
             
             # 检查每个班次是否有损失报告
+            self.logger.info(f"🔍 开始查询各班次的损失数据...")
             shifts_with_loss = []
             total_loss = 0
             
-            for shift_info in previous_shifts:
+            for i, shift_info in enumerate(previous_shifts, 1):
+                self.logger.info(f"   查询第{i}个班次: {shift_info['date']} {shift_info['shift']}")
                 loss_data = self._get_shift_loss_data(shift_info, current_line, daily_plan_data)
+                
                 if loss_data["has_loss"]:
                     shifts_with_loss.append(loss_data)
                     total_loss += loss_data["loss_amount"]
+                    self.logger.info(f"   ✅ 找到损失记录: {loss_data['loss_amount']:.0f}")
+                else:
+                    self.logger.info(f"   ❌ 无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
             
             # 判断是否满足条件：前3个班次都有损失报告 且 累计损失超过10K
             all_shifts_have_loss = len(shifts_with_loss) >= 3
@@ -234,7 +256,7 @@ class LCACapacityLossProcessor:
     
     def _get_shift_loss_data(self, shift_info: Dict[str, str], line: str, daily_plan: pd.DataFrame) -> Dict[str, Any]:
         """
-        获取指定班次的损失数据
+        从事件表获取指定班次的损失数据
         
         Args:
             shift_info: 班次信息字典
@@ -245,38 +267,72 @@ class LCACapacityLossProcessor:
             班次损失数据
         """
         try:
-            # 这里模拟检查班次损失数据
-            # 在实际实现中，需要查询数据库中的历史损失记录
-            # 目前为了演示，我们生成一些模拟数据
-            
             date = shift_info["date"]
             shift = shift_info["shift"]
             
-            # 模拟损失数据（实际应该从数据库查询）
-            # 假设有一定概率的班次有损失报告
-            import random
+            # 从数据库查询历史LCA损失事件
+            from .database_manager import DatabaseManager
             
-            # 为了演示，设置一些模拟的损失数据
-            has_loss = random.choice([True, True, True, False])  # 75%概率有损失
-            loss_amount = random.randint(2000, 8000) if has_loss else 0
+            # 创建数据库管理器实例
+            db_manager = DatabaseManager("data/events.db")
             
-            return {
-                "date": date,
-                "shift": shift,
-                "line": line,
-                "has_loss": has_loss,
-                "loss_amount": loss_amount,
-                "source": "模拟数据"  # 实际应该是"数据库查询"
-            }
+            # 查询匹配的LCA事件
+            matching_events = db_manager.get_lca_events_by_criteria(
+                date=date,
+                line=line
+            )
+            
+            # 查找匹配班次的事件
+            matched_event = None
+            for event in matching_events:
+                event_shift = event.get("选择影响班次")
+                if event_shift == shift:
+                    matched_event = event
+                    break
+            
+            if matched_event:
+                # 提取损失数据
+                loss_amount = matched_event.get("已经损失的产量", 0)
+                if loss_amount is None:
+                    loss_amount = 0
+                
+                # 尝试转换为数字
+                try:
+                    loss_amount = float(loss_amount)
+                except (ValueError, TypeError):
+                    loss_amount = 0
+                
+                return {
+                    "date": date,
+                    "shift": shift,
+                    "line": line,
+                    "has_loss": loss_amount > 0,
+                    "loss_amount": loss_amount,
+                    "event_id": matched_event.get("事件ID", ""),
+                    "source": "事件数据库",
+                    "event_data": matched_event
+                }
+            else:
+                # 没有找到匹配的事件
+                return {
+                    "date": date,
+                    "shift": shift,
+                    "line": line,
+                    "has_loss": False,
+                    "loss_amount": 0,
+                    "source": "事件数据库",
+                    "reason": f"未找到{date} {shift}班次的损失事件"
+                }
             
         except Exception as e:
-            self.logger.error(f"获取班次损失数据时发生错误: {str(e)}")
+            self.logger.error(f"从事件表获取班次损失数据时发生错误: {str(e)}")
             return {
                 "date": shift_info.get("date", ""),
                 "shift": shift_info.get("shift", ""),
                 "line": line,
                 "has_loss": False,
                 "loss_amount": 0,
+                "source": "错误",
                 "error": str(e)
             }
     
