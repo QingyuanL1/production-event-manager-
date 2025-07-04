@@ -96,10 +96,6 @@ class LCACapacityLossProcessor:
         self.logger.info("检查是否有LCA产量损失报告...")
         
         try:
-            # 检查事件数据中是否包含LCA产量损失相关信息
-            # 这里可以根据实际业务需求来判断报告是否存在
-            # 例如：检查特定字段、文件存在性、数据库记录等
-            
             # 基本检查：事件数据是否包含必要字段
             required_fields = ['选择影响日期', '选择影响班次', '选择产线', '输入XX小时']
             for field in required_fields:
@@ -113,8 +109,41 @@ class LCACapacityLossProcessor:
                 self.logger.warning("损失小时数无效或为0")
                 return False
             
-            # 可以在这里添加更多的检查逻辑
-            # 例如：检查是否存在相关的报告文件、数据库记录等
+            # 验证Daily Plan中是否存在对应的生产计划数据
+            date = event_data.get('选择影响日期')
+            line = event_data.get('选择产线')
+            
+            # 获取Daily Plan数据
+            daily_plan = self.data_loader.get_data('HSA Daily Plan')
+            if daily_plan is None or daily_plan.empty:
+                # 尝试加载Daily Plan数据
+                success, message, daily_plan = self.data_loader.load_data('HSA Daily Plan')
+                if not success or daily_plan is None or daily_plan.empty:
+                    self.logger.warning("无法获取Daily Plan数据")
+                    return False
+            
+            # 检查指定日期是否在Daily Plan中
+            if date not in daily_plan.columns:
+                self.logger.warning(f"Daily Plan中不存在指定日期: {date}")
+                return False
+            
+            # 检查指定产线是否在Daily Plan中
+            if daily_plan.empty or line not in daily_plan.iloc[:, 0].values:
+                self.logger.warning(f"Daily Plan中不存在指定产线: {line}")
+                return False
+            
+            # 检查该日期该产线是否有生产计划
+            line_data = daily_plan[daily_plan.iloc[:, 0] == line]
+            if line_data.empty or line_data[date].isna().all():
+                self.logger.warning(f"指定日期和产线没有生产计划: {date}, {line}")
+                return False
+            
+            # 如果指定了产品PN，验证是否存在
+            product_pn = event_data.get('确认产品PN')
+            if product_pn:
+                if product_pn not in line_data.iloc[:, 2].values:
+                    self.logger.warning(f"指定产线不生产该产品: {line}, {product_pn}")
+                    return False
             
             self.logger.info("LCA产量损失报告检查通过")
             return True

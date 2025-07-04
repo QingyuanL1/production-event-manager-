@@ -4,8 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 import re
-import os
-import json
+from .database_manager import DatabaseManager
 
 class EventManager:
     """
@@ -24,18 +23,8 @@ class EventManager:
         self.data_loader = data_loader
         self.log_callback = log_callback
         
-        # 事件存储文件路径
-        self.events_file = "data/events.json"
-        self.events_backup_file = "data/events_backup.json"
-        
-        # 确保数据目录存在
-        os.makedirs("data", exist_ok=True)
-        
-        # 事件存储列表
-        self.events = []
-        
-        # 加载已保存的事件
-        self.load_events()
+        # 初始化数据库管理器
+        self.db_manager = DatabaseManager("data/events.db", self._create_logger())
         
         # 当前事件录入状态
         self.current_event = {}
@@ -151,6 +140,29 @@ class EventManager:
             self.log_callback(level, message)
         else:
             print(f"[{level}] {message}")
+    
+    def _create_logger(self):
+        """创建日志记录器"""
+        import logging
+        
+        class EventManagerLoggerAdapter:
+            """日志适配器，将数据库日志转发到EventManager的日志系统"""
+            def __init__(self, event_manager):
+                self.event_manager = event_manager
+            
+            def info(self, message):
+                self.event_manager.log_message("INFO", message)
+            
+            def error(self, message):
+                self.event_manager.log_message("ERROR", message)
+            
+            def warning(self, message):
+                self.event_manager.log_message("WARNING", message)
+            
+            def debug(self, message):
+                self.event_manager.log_message("DEBUG", message)
+        
+        return EventManagerLoggerAdapter(self)
     
     def get_data_source_options(self, source: str, context: Dict = None) -> List[str]:
         """
@@ -397,138 +409,68 @@ class EventManager:
         if not is_valid:
             return False, error_msg
         
-        # 添加时间戳和ID
-        event_data["创建时间"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        event_data["事件ID"] = f"EVT_{len(self.events) + 1:04d}"
+        # 如果是LCA产能损失事件，从Daily Plan获取实际数据
+        if event_data.get("事件类型") == "LCA产能损失":
+            self._enhance_lca_event_data(event_data)
         
-        # 保存事件
-        self.events.append(event_data.copy())
+        # 使用数据库管理器创建事件
+        success, message = self.db_manager.create_event(event_data)
         
-        # 持久化保存事件
-        self.save_events()
+        if success:
+            self.log_message("SUCCESS", f"事件创建成功: {event_data.get('事件ID', 'Unknown')} - {event_data.get('事件类型', 'Unknown')}")
         
-        self.log_message("SUCCESS", f"事件创建成功: {event_data['事件ID']} - {event_data.get('事件类型', 'Unknown')}")
-        
-        return True, f"事件 {event_data['事件ID']} 创建成功"
+        return success, message
     
     def get_events(self) -> List[Dict]:
         """获取所有事件列表"""
-        return self.events.copy()
+        return self.db_manager.get_all_events()
     
     def delete_event(self, event_id: str) -> bool:
         """删除指定事件"""
-        for i, event in enumerate(self.events):
-            if event.get("事件ID") == event_id:
-                del self.events[i]
-                # 持久化保存删除后的事件列表
-                self.save_events()
-                self.log_message("INFO", f"事件已删除: {event_id}")
-                return True
-        return False
+        success = self.db_manager.delete_event(event_id)
+        if success:
+            self.log_message("INFO", f"事件已删除: {event_id}")
+        return success
     
     def export_events_to_excel(self, file_path: str) -> bool:
         """导出事件到Excel文件"""
-        try:
-            if not self.events:
-                return False
-            
-            df = pd.DataFrame(self.events)
-            df.to_excel(file_path, index=False)
+        success = self.db_manager.export_to_excel(file_path)
+        if success:
             self.log_message("SUCCESS", f"事件已导出到: {file_path}")
-            return True
-        except Exception as e:
-            self.log_message("ERROR", f"导出事件时出错: {str(e)}")
-            return False
+        else:
+            self.log_message("ERROR", "导出事件失败")
+        return success
     
-    def save_events(self) -> bool:
+    def _enhance_lca_event_data(self, event_data: Dict) -> None:
         """
-        保存事件到JSON文件
+        增强LCA事件数据，从Daily Plan获取实际数据
         
-        Returns:
-            bool: 保存是否成功
+        Args:
+            event_data: 事件数据字典（会被修改）
         """
         try:
-            # 创建备份文件
-            if os.path.exists(self.events_file):
-                try:
-                    with open(self.events_file, 'r', encoding='utf-8') as f:
-                        backup_data = json.load(f)
-                    with open(self.events_backup_file, 'w', encoding='utf-8') as f:
-                        json.dump(backup_data, f, ensure_ascii=False, indent=2)
-                except Exception as e:
-                    self.log_message("WARNING", f"创建备份文件时出错: {str(e)}")
+            date = event_data.get("选择影响日期")
+            line = event_data.get("选择产线")
+            product_pn = event_data.get("确认产品PN")
             
-            # 保存当前事件数据
-            with open(self.events_file, 'w', encoding='utf-8') as f:
-                json.dump(self.events, f, ensure_ascii=False, indent=2)
+            if date and line and product_pn:
+                # 从Daily Plan获取计划产量
+                planned_qty = self._get_planned_quantity(date, line, product_pn)
+                if planned_qty is not None:
+                    event_data["_daily_plan_quantity"] = planned_qty
+                    self.log_message("INFO", f"从Daily Plan获取计划产量: {planned_qty}")
+                else:
+                    self.log_message("WARNING", f"无法从Daily Plan获取产量数据: {date}, {line}, {product_pn}")
             
-            self.log_message("INFO", f"事件数据已保存到: {self.events_file}")
-            return True
+            # 验证损失产量是否合理
+            lost_qty = event_data.get("已经损失的产量")
+            if lost_qty and event_data.get("_daily_plan_quantity"):
+                if float(lost_qty) > float(event_data["_daily_plan_quantity"]):
+                    self.log_message("WARNING", f"损失产量({lost_qty})超过计划产量({event_data['_daily_plan_quantity']})")
             
         except Exception as e:
-            self.log_message("ERROR", f"保存事件数据时出错: {str(e)}")
-            return False
+            self.log_message("ERROR", f"增强LCA事件数据时出错: {str(e)}")
     
-    def load_events(self) -> bool:
-        """
-        从JSON文件加载事件
-        
-        Returns:
-            bool: 加载是否成功
-        """
-        try:
-            if not os.path.exists(self.events_file):
-                self.log_message("INFO", "事件文件不存在，使用空事件列表")
-                return True
-            
-            with open(self.events_file, 'r', encoding='utf-8') as f:
-                self.events = json.load(f)
-            
-            self.log_message("INFO", f"已加载 {len(self.events)} 个事件")
-            return True
-            
-        except Exception as e:
-            self.log_message("ERROR", f"加载事件数据时出错: {str(e)}")
-            
-            # 尝试从备份文件恢复
-            if os.path.exists(self.events_backup_file):
-                try:
-                    with open(self.events_backup_file, 'r', encoding='utf-8') as f:
-                        self.events = json.load(f)
-                    self.log_message("INFO", f"从备份文件恢复了 {len(self.events)} 个事件")
-                    return True
-                except Exception as backup_e:
-                    self.log_message("ERROR", f"从备份文件恢复时出错: {str(backup_e)}")
-            
-            # 如果都失败了，使用空列表
-            self.events = []
-            return False
-    
-    def clear_all_events(self) -> bool:
-        """
-        清空所有事件（需要确认操作）
-        
-        Returns:
-            bool: 清空是否成功
-        """
-        try:
-            # 先备份当前数据
-            if self.events:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_file = f"data/events_clear_backup_{timestamp}.json"
-                with open(backup_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.events, f, ensure_ascii=False, indent=2)
-                self.log_message("INFO", f"清空前数据已备份到: {backup_file}")
-            
-            # 清空事件列表
-            self.events = []
-            
-            # 保存空列表
-            self.save_events()
-            
-            self.log_message("SUCCESS", "所有事件已清空")
-            return True
-            
-        except Exception as e:
-            self.log_message("ERROR", f"清空事件时出错: {str(e)}")
-            return False
+    def get_database_stats(self) -> Dict[str, Any]:
+        """获取数据库统计信息"""
+        return self.db_manager.get_database_stats()
