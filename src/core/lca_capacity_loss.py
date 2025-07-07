@@ -43,31 +43,31 @@ class LCACapacityLossProcessor:
             处理结果字典
         """
         self.logger.info("=" * 60)
-        self.logger.info("**开始处理LCA产能损失事件**")
+        self.logger.info("🚀 **开始处理LCA产能损失事件**")
         self.logger.info(f"当前事件信息: 日期={event_data.get('选择影响日期')}, 班次={event_data.get('选择影响班次')}, 产线={event_data.get('选择产线')}")
         
         try:
             # 步骤0：首先计算本班预测产量 I
-            self.logger.info("**步骤0: 计算本班预测产量 I...**")
+            self.logger.info("📊 **步骤0: 计算本班预测产量 I...**")
             forecast_calculation = self._calculate_shift_forecast_i(event_data)
             
             if forecast_calculation["status"] == "success":
-                self.logger.info("**本班预测产量计算成功:**")
-                self.logger.info(f"   E (本班出货计划): {forecast_calculation['E']}")
-                self.logger.info(f"   C (已损失产量): {forecast_calculation['C']}")
-                self.logger.info(f"   D (剩余修理时间): {forecast_calculation['D']}小时")
-                self.logger.info(f"   计算公式: F = E - C - D*(E/11)")
-                self.logger.info(f"   **F (本班预测产量 I): {forecast_calculation['F']:.2f}**")
-                self.logger.info(f"   每小时产能损失: {forecast_calculation['capacity_loss_per_hour']:.2f}")
-                self.logger.info(f"   总产能损失: {forecast_calculation['total_capacity_loss']:.2f}")
+                self.logger.info("✅ **本班预测产量计算成功:**")
+                self.logger.info(f"   📈 E (本班出货计划): {forecast_calculation['E']}")
+                self.logger.info(f"   📉 C (已损失产量): {forecast_calculation['C']}")
+                self.logger.info(f"   ⏱️ D (剩余修理时间): {forecast_calculation['D']}小时")
+                self.logger.info(f"   🧮 计算公式: F = E - C - D*(E/11)")
+                self.logger.info(f"   🎯 **F (本班预测产量 I): {forecast_calculation['F']:.2f}**")
+                self.logger.info(f"   ⚡ 每小时产能损失: {forecast_calculation['capacity_loss_per_hour']:.2f}")
+                self.logger.info(f"   📊 总产能损失: {forecast_calculation['total_capacity_loss']:.2f}")
             else:
-                self.logger.error(f"本班预测产量计算失败: {forecast_calculation['message']}")
+                self.logger.error(f"❌ 本班预测产量计算失败: {forecast_calculation['message']}")
             
             # 步骤1：检查前3个班次都有报告损失，且累计损失超过10K
-            self.logger.info("**步骤1: 开始检查前3个班次的损失情况...**")
+            self.logger.info("🔍 **步骤1: 开始检查前3个班次的损失情况...**")
             check_result = self._check_previous_shifts_loss(event_data)
             
-            self.logger.info(f"**检查结果统计:**")
+            self.logger.info(f"📋 **检查结果统计:**")
             self.logger.info(f"   - 检查班次数: {check_result.get('shifts_checked', 0)}")
             self.logger.info(f"   - 有损失班次: {check_result.get('shifts_with_loss', 0)}")
             self.logger.info(f"   - 累计损失: {check_result.get('total_loss', 0):.0f}")
@@ -79,8 +79,8 @@ class LCACapacityLossProcessor:
             
             # 检查是否需要跳出事件
             if dos_calculation.get("status") == "skip_event":
-                self.logger.info("**事件处理结果: 跳出事件**")
-                self.logger.info(f"原因: {dos_calculation.get('message')}")
+                self.logger.info("⚠️ **事件处理结果: 跳出事件**")
+                self.logger.info(f"📝 原因: {dos_calculation.get('message')}")
                 return {
                     "status": "skip_event",
                     "message": dos_calculation.get('message'),
@@ -93,8 +93,8 @@ class LCACapacityLossProcessor:
                 }
             
             if check_result["has_sufficient_loss"]:
-                self.logger.info("**判定结果: 前3个班次累计损失超过10K，建议加线**")
-                self.logger.info("**输出建议: 产线状况不佳，考虑加线**")
+                self.logger.info("✅ **判定结果: 前3个班次累计损失超过10K，建议加线**")
+                self.logger.info("🏭 **输出建议: 产线状况不佳，考虑加线**")
                 
                 # 将DOS计算结果包含在返回结果中
                 return {
@@ -108,8 +108,8 @@ class LCACapacityLossProcessor:
                     "event_data": event_data
                 }
             else:
-                self.logger.info("**判定结果: 未达到加线条件，继续正常流程**")
-                self.logger.info(f"原因: {check_result.get('reason', '未知')}")
+                self.logger.info("ℹ️ **判定结果: 未达到加线条件，继续正常流程**")
+                self.logger.info(f"📝 原因: {check_result.get('reason', '未知')}")
                 
                 return {
                     "status": "normal_process",
@@ -124,7 +124,7 @@ class LCACapacityLossProcessor:
             
         except Exception as e:
             error_msg = f"处理LCA产能损失事件失败: {str(e)}"
-            self.logger.error(f"**{error_msg}**")
+            self.logger.error(f"❌ **{error_msg}**")
             return {
                 "status": "error",
                 "message": error_msg,
@@ -357,12 +357,12 @@ class LCACapacityLossProcessor:
             
             # 获取前3个班次的信息
             previous_shifts = self._get_previous_3_shifts(current_date, current_shift)
-            self.logger.info(f"**计算得出前3个班次:**")
+            self.logger.info(f"📅 **计算得出前3个班次:**")
             for i, shift in enumerate(previous_shifts, 1):
                 self.logger.info(f"   {i}. {shift['date']} {shift['shift']}")
             
             # 检查每个班次是否有损失报告
-            self.logger.info(f"**开始查询各班次的损失数据...**")
+            self.logger.info(f"🔍 **开始查询各班次的损失数据...**")
             shifts_with_loss = []
             total_loss = 0
             
@@ -373,9 +373,9 @@ class LCACapacityLossProcessor:
                 if loss_data["has_loss"]:
                     shifts_with_loss.append(loss_data)
                     total_loss += loss_data["loss_amount"]
-                    self.logger.info(f"   找到损失记录: {loss_data['loss_amount']:.0f}")
+                    self.logger.info(f"   ✅ 找到损失记录: {loss_data['loss_amount']:.0f}")
                 else:
-                    self.logger.info(f"   无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
+                    self.logger.info(f"   ❌ 无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
             
             # 判断是否满足条件：前3个班次都有损失报告 且 累计损失超过10K
             all_shifts_have_loss = len(shifts_with_loss) >= 3
@@ -765,9 +765,9 @@ class LCACapacityLossProcessor:
                 "group_pns": group_rows['P/N'].tolist()
             }
             
-            self.logger.info(f"计算PN {part_number} 的G值: {g_value}")
-            self.logger.info(f"   Product: {product}, Head_Qty: {head_qty}")
-            self.logger.info(f"   组内PN数量: {len(group_rows)}")
+            self.logger.info(f"📎 计算PN {part_number} 的G值: {g_value}")
+            self.logger.info(f"   🏷️ Product: {product}, Head_Qty: {head_qty}")
+            self.logger.info(f"   🔢 组内PN数量: {len(group_rows)}")
             
             return float(g_value), details
             
@@ -841,7 +841,7 @@ class LCACapacityLossProcessor:
                     "next_shifts": next_shifts,
                     "i_total": 0.0
                 }
-                self.logger.info("**下两个班次出货计划都为0，跳出事件**")
+                self.logger.info("⚠️ **下两个班次出货计划都为0，跳出事件**")
                 return 0.0, details
                 
             elif len(valid_forecasts) == 1:
@@ -857,7 +857,7 @@ class LCACapacityLossProcessor:
                     "i_total": i_total,
                     "single_forecast": valid_forecasts[0]
                 }
-                self.logger.info(f"**只有一个班次有有效出货计划，将其乘以2: {valid_forecasts[0]} * 2 = {i_total}**")
+                self.logger.info(f"🔢 **只有一个班次有有效出货计划，将其乘以2: {valid_forecasts[0]} * 2 = {i_total}**")
                 
             else:
                 # 两个班次都有数据，正常求和
@@ -871,7 +871,7 @@ class LCACapacityLossProcessor:
                     "next_shifts": next_shifts,
                     "i_total": i_total
                 }
-                self.logger.info(f"**两个班次都有有效出货计划，总和 I: {i_total}**")
+                self.logger.info(f"➕ **两个班次都有有效出货计划，总和 I: {i_total}**")
             
             return float(i_total), details
             
@@ -899,7 +899,7 @@ class LCACapacityLossProcessor:
             DOS计算结果字典
         """
         try:
-            self.logger.info("**步骤2: 计算预测损失后新DOS...**")
+            self.logger.info("🧮 **步骤2: 计算预测损失后新DOS...**")
             
             # 获取必要的参数
             part_number = event_data.get("确认产品PN")
@@ -966,13 +966,13 @@ class LCACapacityLossProcessor:
             dos_value = (g_value + f_value - h_value) / i_value
             
             # 记录详细计算过程
-            self.logger.info("**DOS计算公式: (G+F-H)/I**")
-            self.logger.info(f"   G (上一个班的合计EOH): {g_value}")
-            self.logger.info(f"   F (本班预计产量): {f_value}")
-            self.logger.info(f"   H (本班出货计划): {h_value}")
-            self.logger.info(f"   I (下两个班次出货计划): {i_value}")
-            self.logger.info(f"   计算过程: ({g_value} + {f_value} - {h_value}) / {i_value}")
-            self.logger.info(f"   **预测损失后新DOS: {dos_value:.2f} 天**")
+            self.logger.info("🧮 **DOS计算公式: (G+F-H)/I**")
+            self.logger.info(f"   📎 G (上一个班的合计EOH): {g_value}")
+            self.logger.info(f"   🎯 F (本班预计产量): {f_value}")
+            self.logger.info(f"   📈 H (本班出货计划): {h_value}")
+            self.logger.info(f"   📅 I (下两个班次出货计划): {i_value}")
+            self.logger.info(f"   📊 计算过程: ({g_value} + {f_value} - {h_value}) / {i_value}")
+            self.logger.info(f"   🆕 **预测损失后新DOS: {dos_value:.2f} 天**")
             
             return {
                 "status": "success",

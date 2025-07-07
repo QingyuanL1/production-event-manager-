@@ -695,32 +695,32 @@ class EventManager:
             
             # 输出处理结果
             if result["status"] == "skip_event":
-                self.log_message("WARNING", f"**{result['message']}**")
-                self.log_message("INFO", f"**最终建议: {result.get('recommendation', 'N/A')}**")
+                self.log_message("WARNING", f"⚠️ **{result['message']}**")
+                self.log_message("INFO", f"📋 **最终建议: {result.get('recommendation', 'N/A')}**")
                 
             elif result["status"] == "add_line_required":
-                self.log_message("WARNING", f"**{result['message']}**")
-                self.log_message("INFO", f"累计损失: {result.get('check_result', {}).get('total_loss', 0):.0f}")
+                self.log_message("WARNING", f"🚨 **{result['message']}**")
+                self.log_message("INFO", f"📊 累计损失: {result.get('check_result', {}).get('total_loss', 0):.0f}")
                 
                 # 输出DOS计算结果
                 dos_calc = result.get('dos_calculation', {})
                 if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
-                    self.log_message("INFO", f"**预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
+                    self.log_message("INFO", f"🆕 **预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
                 else:
-                    self.log_message("WARNING", f"DOS计算失败: {dos_calc.get('message', '未知错误')}")
+                    self.log_message("WARNING", f"❌ DOS计算失败: {dos_calc.get('message', '未知错误')}")
                     
             elif result["status"] == "normal_process":
-                self.log_message("INFO", f"**{result['message']}**")
+                self.log_message("INFO", f"✅ **{result['message']}**")
                 
                 # 输出DOS计算结果
                 dos_calc = result.get('dos_calculation', {})
                 if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
-                    self.log_message("INFO", f"**预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
+                    self.log_message("INFO", f"🆕 **预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
                 else:
-                    self.log_message("WARNING", f"DOS计算失败: {dos_calc.get('message', '未知错误')}")
+                    self.log_message("WARNING", f"❌ DOS计算失败: {dos_calc.get('message', '未知错误')}")
                     
             elif result["status"] == "error":
-                self.log_message("ERROR", f"**LCA处理失败: {result['message']}**")
+                self.log_message("ERROR", f"❌ **LCA处理失败: {result['message']}**")
             
             # 保存处理结果到数据库（移除不可序列化的对象）
             result_copy = result.copy()
