@@ -74,46 +74,45 @@ class LCACapacityLossProcessor:
             self.logger.info(f"   - 所有班次都有损失: {check_result.get('all_shifts_have_loss', False)}")
             self.logger.info(f"   - 损失超过10K: {check_result.get('total_exceeds_10k', False)}")
             
-            # 执行DOS计算（无论是否超过10K阈值都需要计算）
-            dos_calculation = self._calculate_new_dos(event_data, forecast_calculation)
-            
-            # 检查是否需要跳出事件
-            if dos_calculation.get("status") == "skip_event":
-                self.logger.info("⚠️ **事件处理结果: 跳出事件**")
-                self.logger.info(f"📝 原因: {dos_calculation.get('message')}")
-                return {
-                    "status": "skip_event",
-                    "message": dos_calculation.get('message'),
-                    "step": "DOS计算",
-                    "check_result": check_result,
-                    "dos_calculation": dos_calculation,
-                    "forecast_calculation": forecast_calculation,
-                    "recommendation": "跳出事件",
-                    "event_data": event_data
-                }
-            
+            # 根据损失检查结果决定后续流程
             if check_result["has_sufficient_loss"]:
                 self.logger.info("✅ **判定结果: 前3个班次累计损失超过10K，建议加线**")
                 self.logger.info("🏭 **输出建议: 产线状况不佳，考虑加线**")
                 
-                # 将DOS计算结果包含在返回结果中
                 return {
                     "status": "add_line_required",
                     "message": "产线状况不佳，考虑加线",
-                    "step": "检查前3班次损失 + DOS计算",
+                    "step": "检查前3班次损失",
                     "check_result": check_result,
-                    "dos_calculation": dos_calculation,
                     "forecast_calculation": forecast_calculation,
                     "recommendation": "加线",
                     "event_data": event_data
                 }
             else:
-                self.logger.info("ℹ️ **判定结果: 未达到加线条件，继续正常流程**")
+                self.logger.info("ℹ️ **判定结果: 未达到加线条件，继续计算DOS**")
                 self.logger.info(f"📝 原因: {check_result.get('reason', '未知')}")
+                
+                # 步骤2：只有在不需要加线时才执行DOS计算
+                dos_calculation = self._calculate_new_dos(event_data, forecast_calculation)
+                
+                # 检查是否需要跳出事件
+                if dos_calculation.get("status") == "skip_event":
+                    self.logger.info("⚠️ **事件处理结果: 跳出事件**")
+                    self.logger.info(f"📝 原因: {dos_calculation.get('message')}")
+                    return {
+                        "status": "skip_event",
+                        "message": dos_calculation.get('message'),
+                        "step": "DOS计算",
+                        "check_result": check_result,
+                        "dos_calculation": dos_calculation,
+                        "forecast_calculation": forecast_calculation,
+                        "recommendation": "跳出事件",
+                        "event_data": event_data
+                    }
                 
                 return {
                     "status": "normal_process",
-                    "message": "损失在正常范围内，按标准流程处理",
+                    "message": "损失在正常范围内，已计算DOS",
                     "step": "检查前3班次损失 + DOS计算",
                     "check_result": check_result,
                     "dos_calculation": dos_calculation,
@@ -266,7 +265,7 @@ class LCACapacityLossProcessor:
             # 找到Forecast行 - 修复逻辑：找到与目标产线相关的forecast
             line_column = df_with_shifts.columns[0]
             
-            # 如果提供了目标产线，优先查找与该产线相关的forecast
+            # 如果提供了目标产线，直接查找该产线行的数值
             if target_line:
                 # 步骤1：找到目标产线行
                 target_line_row = None
@@ -275,10 +274,19 @@ class LCACapacityLossProcessor:
                     if pd.notna(line_value) and target_line in str(line_value):
                         target_line_row = idx
                         self.logger.info(f"找到目标产线 {target_line} 在行 {idx}")
-                        break
+                        
+                        # 直接从该产线行获取目标列的值
+                        line_value = row[target_column]
+                        if pd.notna(line_value) and line_value != 0:
+                            self.logger.info(f"找到 {target_line} 的数值: {line_value}")
+                            return float(line_value)
+                        else:
+                            # 如果产线行在该班次没有值，返回0
+                            self.logger.info(f"{target_line} 在 {date} {shift} 班次无数值，返回0")
+                            return 0.0
                 
+                # 如果产线行本身没有值，则查找最近的forecast行
                 if target_line_row is not None:
-                    # 步骤2：找到最近的forecast行（在目标产线之前）
                     forecast_rows = []
                     for idx, row in df_with_shifts.iterrows():
                         line_value = row[line_column]
@@ -299,7 +307,7 @@ class LCACapacityLossProcessor:
                                 closest_forecast_value = forecast_value
                     
                     if closest_forecast_value is not None:
-                        self.logger.info(f"找到 {target_line} 的forecast值: {closest_forecast_value}")
+                        self.logger.info(f"找到 {target_line} 关联的forecast值: {closest_forecast_value}")
                         return float(closest_forecast_value)
             
             # 如果没有指定产线或没有找到相关forecast，使用原始逻辑（找第一个非零forecast）

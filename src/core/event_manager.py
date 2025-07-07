@@ -701,22 +701,17 @@ class EventManager:
             elif result["status"] == "add_line_required":
                 self.log_message("WARNING", f"🚨 **{result['message']}**")
                 self.log_message("INFO", f"📊 累计损失: {result.get('check_result', {}).get('total_loss', 0):.0f}")
-                
-                # 输出DOS计算结果
-                dos_calc = result.get('dos_calculation', {})
-                if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
-                    self.log_message("INFO", f"🆕 **预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
-                else:
-                    self.log_message("WARNING", f"❌ DOS计算失败: {dos_calc.get('message', '未知错误')}")
+                self.log_message("INFO", f"📋 **最终建议: {result.get('recommendation', 'N/A')}**")
+                # 注意：加线情况下不计算DOS
                     
             elif result["status"] == "normal_process":
                 self.log_message("INFO", f"✅ **{result['message']}**")
                 
                 # 输出DOS计算结果
                 dos_calc = result.get('dos_calculation', {})
-                if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
+                if dos_calc and dos_calc.get('status') in ['success', 'single_forecast_doubled']:
                     self.log_message("INFO", f"🆕 **预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
-                else:
+                elif dos_calc:
                     self.log_message("WARNING", f"❌ DOS计算失败: {dos_calc.get('message', '未知错误')}")
                     
             elif result["status"] == "error":
