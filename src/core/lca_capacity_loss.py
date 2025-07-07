@@ -10,6 +10,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 import logging
+import os
 
 
 class LCACapacityLossProcessor:
@@ -73,14 +74,21 @@ class LCACapacityLossProcessor:
             self.logger.info(f"   - 所有班次都有损失: {check_result.get('all_shifts_have_loss', False)}")
             self.logger.info(f"   - 损失超过10K: {check_result.get('total_exceeds_10k', False)}")
             
+            # 执行DOS计算（无论是否超过10K阈值都需要计算）
+            dos_calculation = self._calculate_new_dos(event_data, forecast_calculation)
+            
             if check_result["has_sufficient_loss"]:
                 self.logger.info("**判定结果: 前3个班次累计损失超过10K，建议加线**")
                 self.logger.info("**输出建议: 产线状况不佳，考虑加线**")
+                
+                # 将DOS计算结果包含在返回结果中
                 return {
                     "status": "add_line_required",
                     "message": "产线状况不佳，考虑加线",
-                    "step": "检查前3班次损失",
+                    "step": "检查前3班次损失 + DOS计算",
                     "check_result": check_result,
+                    "dos_calculation": dos_calculation,
+                    "forecast_calculation": forecast_calculation,
                     "recommendation": "加线",
                     "event_data": event_data
                 }
@@ -88,14 +96,13 @@ class LCACapacityLossProcessor:
                 self.logger.info("**判定结果: 未达到加线条件，继续正常流程**")
                 self.logger.info(f"原因: {check_result.get('reason', '未知')}")
                 
-                # 这里是下一步逻辑的入口点
-                self.logger.info("暂停：等待下一步业务逻辑的定义")
-                
                 return {
                     "status": "normal_process",
                     "message": "损失在正常范围内，按标准流程处理",
-                    "step": "检查前3班次损失",
+                    "step": "检查前3班次损失 + DOS计算",
                     "check_result": check_result,
+                    "dos_calculation": dos_calculation,
+                    "forecast_calculation": forecast_calculation,
                     "recommendation": "标准处理",
                     "event_data": event_data
                 }
@@ -662,3 +669,268 @@ class LCACapacityLossProcessor:
             return f"前3个班次中部分没有损失报告，累计损失{total_loss:.0f}"
         else:  # total_exceeds_10k is False
             return f"前3个班次都有损失报告，但累计损失{total_loss:.0f}未超过10K"
+    
+    def _load_fg_eoh_data(self) -> Optional[pd.DataFrame]:
+        """
+        加载FG EOH数据
+        
+        Returns:
+            FG EOH DataFrame或None
+        """
+        try:
+            file_path = "data/FG EOH.xlsx"
+            if not os.path.exists(file_path):
+                self.logger.error(f"FG EOH文件不存在: {file_path}")
+                return None
+            
+            df = pd.read_excel(file_path, sheet_name=0)
+            
+            # 清理列名中的多余空格
+            df.columns = df.columns.str.strip()
+            
+            # 标准化TTL QTY列名
+            if 'TTL  QTY' in df.columns:
+                df = df.rename(columns={'TTL  QTY': 'TTL QTY'})
+            
+            self.logger.info(f"成功加载FG EOH数据: {df.shape}")
+            self.logger.info(f"列名: {list(df.columns)}")
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"加载FG EOH数据失败: {str(e)}")
+            return None
+    
+    def _get_g_value_for_pn(self, part_number: str) -> Tuple[float, Dict[str, Any]]:
+        """
+        为指定PN获取G值（上一个班的合计EOH库存）
+        
+        Args:
+            part_number: 产品PN号
+            
+        Returns:
+            (G值, 详细信息字典)
+        """
+        try:
+            df = self._load_fg_eoh_data()
+            if df is None:
+                return 0.0, {"status": "error", "message": "无法加载FG EOH数据"}
+            
+            # 查找包含指定PN的行（处理数字格式的PN）
+            try:
+                # 尝试将part_number转换为float进行匹配
+                pn_numeric = float(part_number)
+                pn_rows = df[df['P/N'] == pn_numeric]
+            except (ValueError, TypeError):
+                # 如果转换失败，使用字符串匹配
+                pn_rows = df[df['P/N'].astype(str) == str(part_number)]
+            
+            if pn_rows.empty:
+                return 0.0, {
+                    "status": "error", 
+                    "message": f"未找到PN {part_number} 的EOH数据"
+                }
+            
+            # 获取该PN所属的Product和Head_Qty
+            pn_row = pn_rows.iloc[0]
+            product = pn_row['Product']
+            head_qty = pn_row['Head_Qty']
+            
+            # 找到同一Product和Head_Qty组的所有行
+            group_rows = df[(df['Product'] == product) & (df['Head_Qty'] == head_qty)]
+            
+            # 计算TTL QTY总和作为G值
+            g_value = group_rows['TTL QTY'].sum()
+            
+            details = {
+                "status": "success",
+                "product": product,
+                "head_qty": head_qty,
+                "group_size": len(group_rows),
+                "g_value": g_value,
+                "group_pns": group_rows['P/N'].tolist()
+            }
+            
+            self.logger.info(f"计算PN {part_number} 的G值: {g_value}")
+            self.logger.info(f"   Product: {product}, Head_Qty: {head_qty}")
+            self.logger.info(f"   组内PN数量: {len(group_rows)}")
+            
+            return float(g_value), details
+            
+        except Exception as e:
+            error_msg = f"计算PN {part_number} 的G值时出错: {str(e)}"
+            self.logger.error(error_msg)
+            return 0.0, {"status": "error", "message": error_msg}
+    
+    def _get_next_two_shifts_forecast(self, current_date: str, current_shift: str, target_line: str) -> Tuple[float, Dict[str, Any]]:
+        """
+        获取下两个班次的出货计划总和（I值）
+        
+        Args:
+            current_date: 当前日期 (YYYY-MM-DD格式)
+            current_shift: 当前班次 (T1, T2, T3, T4)
+            target_line: 目标产线
+            
+        Returns:
+            (I值, 详细信息字典)
+        """
+        try:
+            # 获取所有可用班次
+            daily_plan = self._get_daily_plan_with_shifts()
+            if daily_plan is None:
+                return 0.0, {"status": "error", "message": "无法获取Daily Plan数据"}
+            
+            available_shifts = self._extract_available_shifts(daily_plan)
+            
+            # 找到当前班次位置
+            current_position = self._find_current_shift_position(available_shifts, current_date, current_shift)
+            if current_position == -1:
+                return 0.0, {"status": "error", "message": f"未找到当前班次 {current_date} {current_shift}"}
+            
+            # 获取下两个班次
+            next_shifts = []
+            i_total = 0.0
+            
+            for i in range(1, 3):  # 下1、2个班次
+                next_pos = current_position + i
+                if next_pos < len(available_shifts):
+                    shift_info = available_shifts[next_pos]
+                    next_date = shift_info["date"]
+                    next_shift = shift_info["shift"]
+                    
+                    # 获取该班次的forecast值
+                    forecast_value = self._get_forecast_value(next_date, next_shift, target_line)
+                    
+                    next_shifts.append({
+                        "date": next_date,
+                        "shift": next_shift,
+                        "forecast": forecast_value
+                    })
+                    
+                    i_total += forecast_value
+                    
+                    self.logger.info(f"   下第{i}个班次 {next_date} {next_shift}: {forecast_value}")
+                else:
+                    self.logger.warning(f"无法找到下第{i}个班次（超出可用范围）")
+            
+            details = {
+                "status": "success",
+                "current_date": current_date,
+                "current_shift": current_shift,
+                "target_line": target_line,
+                "next_shifts": next_shifts,
+                "i_total": i_total
+            }
+            
+            self.logger.info(f"计算下两个班次出货计划总和 I: {i_total}")
+            
+            return float(i_total), details
+            
+        except Exception as e:
+            error_msg = f"获取下两个班次出货计划时出错: {str(e)}"
+            self.logger.error(error_msg)
+            return 0.0, {"status": "error", "message": error_msg}
+    
+    def _calculate_new_dos(self, event_data: Dict[str, Any], forecast_calculation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        计算预测损失后新DOS
+        
+        公式: (G+F-H)/I
+        其中:
+        - G: 上一个班的合计EOH(库存)
+        - F: 本班预计产量 (已计算)
+        - H: 本班出货计划 (forecast_calculation中的E值)
+        - I: 下两个班次的出货计划
+        
+        Args:
+            event_data: 事件数据
+            forecast_calculation: 预测产量计算结果
+            
+        Returns:
+            DOS计算结果字典
+        """
+        try:
+            self.logger.info("**步骤2: 计算预测损失后新DOS...**")
+            
+            # 获取必要的参数
+            part_number = event_data.get("确认产品PN")
+            current_date = event_data.get("选择影响日期")
+            current_shift = event_data.get("选择影响班次")
+            target_line = event_data.get("选择产线")
+            
+            if not all([part_number, current_date, current_shift, target_line]):
+                return {
+                    "status": "error",
+                    "message": "缺少DOS计算必要参数",
+                    "dos_value": 0.0
+                }
+            
+            # 获取F值（本班预计产量）
+            f_value = forecast_calculation.get("F", 0.0)
+            
+            # 获取H值（本班出货计划，即E值）
+            h_value = forecast_calculation.get("E", 0.0)
+            
+            self.logger.info(f"DOS计算参数:")
+            self.logger.info(f"   PN: {part_number}")
+            self.logger.info(f"   产线: {target_line}")
+            self.logger.info(f"   当前班次: {current_date} {current_shift}")
+            
+            # 获取G值（上一个班的合计EOH库存）
+            g_value, g_details = self._get_g_value_for_pn(part_number)
+            if g_details["status"] != "success":
+                return {
+                    "status": "error",
+                    "message": f"获取G值失败: {g_details['message']}",
+                    "dos_value": 0.0
+                }
+            
+            # 获取I值（下两个班次的出货计划）
+            i_value, i_details = self._get_next_two_shifts_forecast(current_date, current_shift, target_line)
+            if i_details["status"] != "success":
+                return {
+                    "status": "error",
+                    "message": f"获取I值失败: {i_details['message']}",
+                    "dos_value": 0.0
+                }
+            
+            # 防止除零错误
+            if i_value <= 0:
+                return {
+                    "status": "error",
+                    "message": "下两个班次出货计划为0，无法计算DOS",
+                    "dos_value": 0.0
+                }
+            
+            # 计算新DOS: (G+F-H)/I
+            dos_value = (g_value + f_value - h_value) / i_value
+            
+            # 记录详细计算过程
+            self.logger.info("**DOS计算公式: (G+F-H)/I**")
+            self.logger.info(f"   G (上一个班的合计EOH): {g_value}")
+            self.logger.info(f"   F (本班预计产量): {f_value}")
+            self.logger.info(f"   H (本班出货计划): {h_value}")
+            self.logger.info(f"   I (下两个班次出货计划): {i_value}")
+            self.logger.info(f"   计算过程: ({g_value} + {f_value} - {h_value}) / {i_value}")
+            self.logger.info(f"   **预测损失后新DOS: {dos_value:.2f} 天**")
+            
+            return {
+                "status": "success",
+                "message": f"DOS计算成功: {dos_value:.2f} 天",
+                "dos_value": dos_value,
+                "g_value": g_value,
+                "f_value": f_value,
+                "h_value": h_value,
+                "i_value": i_value,
+                "g_details": g_details,
+                "i_details": i_details,
+                "calculation_formula": f"({g_value} + {f_value} - {h_value}) / {i_value} = {dos_value:.2f}"
+            }
+            
+        except Exception as e:
+            error_msg = f"计算预测损失后新DOS时出错: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "dos_value": 0.0
+            }
