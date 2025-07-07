@@ -265,9 +265,17 @@ class LCACapacityLossProcessor:
             # 找到Forecast行 - 修复逻辑：找到与目标产线相关的forecast
             line_column = df_with_shifts.columns[0]
             
-            # 如果提供了目标产线，直接查找该产线行的数值
-            if target_line:
-                # 步骤1：找到目标产线行
+            # 区分两种用途：
+            # 1. 如果target_line为None或用于本班预测产量计算，使用Forecast行
+            # 2. 如果target_line不为None且用于DOS计算的I值，使用产线行
+            
+            # 通过检查调用栈来判断用途
+            import inspect
+            frame = inspect.currentframe()
+            caller_name = frame.f_back.f_code.co_name if frame.f_back else ""
+            
+            if target_line and caller_name == "_get_next_two_shifts_forecast":
+                # 这是DOS计算中的I值获取，使用产线行数据
                 target_line_row = None
                 for idx, row in df_with_shifts.iterrows():
                     line_value = row[line_column]
@@ -284,31 +292,42 @@ class LCACapacityLossProcessor:
                             # 如果产线行在该班次没有值，返回0
                             self.logger.info(f"{target_line} 在 {date} {shift} 班次无数值，返回0")
                             return 0.0
-                
-                # 如果产线行本身没有值，则查找最近的forecast行
-                if target_line_row is not None:
-                    forecast_rows = []
+            else:
+                # 这是本班预测产量计算的E值获取，使用Forecast行
+                if target_line:
+                    # 找到目标产线行来确定对应的forecast
+                    target_line_row = None
                     for idx, row in df_with_shifts.iterrows():
                         line_value = row[line_column]
-                        if pd.notna(line_value) and "forecast" in str(line_value).lower():
-                            forecast_value = row[target_column]
-                            if pd.notna(forecast_value) and forecast_value != 0:
-                                forecast_rows.append((idx, forecast_value))
+                        if pd.notna(line_value) and target_line in str(line_value):
+                            target_line_row = idx
+                            self.logger.info(f"找到目标产线 {target_line} 在行 {idx}")
+                            break
                     
-                    # 找到最近的forecast行（在目标产线之前）
-                    closest_forecast_value = None
-                    min_distance = float('inf')
-                    
-                    for forecast_idx, forecast_value in forecast_rows:
-                        if forecast_idx < target_line_row:
-                            distance = target_line_row - forecast_idx
-                            if distance < min_distance:
-                                min_distance = distance
-                                closest_forecast_value = forecast_value
-                    
-                    if closest_forecast_value is not None:
-                        self.logger.info(f"找到 {target_line} 关联的forecast值: {closest_forecast_value}")
-                        return float(closest_forecast_value)
+                    # 查找最近的forecast行（在目标产线之前）
+                    if target_line_row is not None:
+                        forecast_rows = []
+                        for idx, row in df_with_shifts.iterrows():
+                            line_value = row[line_column]
+                            if pd.notna(line_value) and "forecast" in str(line_value).lower():
+                                forecast_value = row[target_column]
+                                if pd.notna(forecast_value) and forecast_value != 0:
+                                    forecast_rows.append((idx, forecast_value))
+                        
+                        # 找到最近的forecast行（在目标产线之前）
+                        closest_forecast_value = None
+                        min_distance = float('inf')
+                        
+                        for forecast_idx, forecast_value in forecast_rows:
+                            if forecast_idx < target_line_row:
+                                distance = target_line_row - forecast_idx
+                                if distance < min_distance:
+                                    min_distance = distance
+                                    closest_forecast_value = forecast_value
+                        
+                        if closest_forecast_value is not None:
+                            self.logger.info(f"找到 {target_line} 关联的forecast值: {closest_forecast_value}")
+                            return float(closest_forecast_value)
             
             # 如果没有指定产线或没有找到相关forecast，使用原始逻辑（找第一个非零forecast）
             for idx, row in df_with_shifts.iterrows():
