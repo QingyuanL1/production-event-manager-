@@ -77,6 +77,21 @@ class LCACapacityLossProcessor:
             # 执行DOS计算（无论是否超过10K阈值都需要计算）
             dos_calculation = self._calculate_new_dos(event_data, forecast_calculation)
             
+            # 检查是否需要跳出事件
+            if dos_calculation.get("status") == "skip_event":
+                self.logger.info("**事件处理结果: 跳出事件**")
+                self.logger.info(f"原因: {dos_calculation.get('message')}")
+                return {
+                    "status": "skip_event",
+                    "message": dos_calculation.get('message'),
+                    "step": "DOS计算",
+                    "check_result": check_result,
+                    "dos_calculation": dos_calculation,
+                    "forecast_calculation": forecast_calculation,
+                    "recommendation": "跳出事件",
+                    "event_data": event_data
+                }
+            
             if check_result["has_sufficient_loss"]:
                 self.logger.info("**判定结果: 前3个班次累计损失超过10K，建议加线**")
                 self.logger.info("**输出建议: 产线状况不佳，考虑加线**")
@@ -788,7 +803,7 @@ class LCACapacityLossProcessor:
             
             # 获取下两个班次
             next_shifts = []
-            i_total = 0.0
+            valid_forecasts = []
             
             for i in range(1, 3):  # 下1、2个班次
                 next_pos = current_position + i
@@ -806,22 +821,57 @@ class LCACapacityLossProcessor:
                         "forecast": forecast_value
                     })
                     
-                    i_total += forecast_value
+                    # 只记录非零的forecast值
+                    if forecast_value > 0:
+                        valid_forecasts.append(forecast_value)
                     
                     self.logger.info(f"   下第{i}个班次 {next_date} {next_shift}: {forecast_value}")
                 else:
                     self.logger.warning(f"无法找到下第{i}个班次（超出可用范围）")
             
-            details = {
-                "status": "success",
-                "current_date": current_date,
-                "current_shift": current_shift,
-                "target_line": target_line,
-                "next_shifts": next_shifts,
-                "i_total": i_total
-            }
-            
-            self.logger.info(f"计算下两个班次出货计划总和 I: {i_total}")
+            # 处理特殊情况
+            if len(valid_forecasts) == 0:
+                # 两个班次都是0，跳出事件
+                details = {
+                    "status": "skip_event",
+                    "message": "下两个班次出货计划都为0，跳出事件",
+                    "current_date": current_date,
+                    "current_shift": current_shift,
+                    "target_line": target_line,
+                    "next_shifts": next_shifts,
+                    "i_total": 0.0
+                }
+                self.logger.info("**下两个班次出货计划都为0，跳出事件**")
+                return 0.0, details
+                
+            elif len(valid_forecasts) == 1:
+                # 只有一个有效数据，乘以2
+                i_total = valid_forecasts[0] * 2
+                details = {
+                    "status": "single_forecast_doubled",
+                    "message": f"只有一个班次有有效出货计划，将其乘以2: {valid_forecasts[0]} * 2 = {i_total}",
+                    "current_date": current_date,
+                    "current_shift": current_shift,
+                    "target_line": target_line,
+                    "next_shifts": next_shifts,
+                    "i_total": i_total,
+                    "single_forecast": valid_forecasts[0]
+                }
+                self.logger.info(f"**只有一个班次有有效出货计划，将其乘以2: {valid_forecasts[0]} * 2 = {i_total}**")
+                
+            else:
+                # 两个班次都有数据，正常求和
+                i_total = sum(valid_forecasts)
+                details = {
+                    "status": "success",
+                    "message": f"两个班次都有有效出货计划，总和: {i_total}",
+                    "current_date": current_date,
+                    "current_shift": current_shift,
+                    "target_line": target_line,
+                    "next_shifts": next_shifts,
+                    "i_total": i_total
+                }
+                self.logger.info(f"**两个班次都有有效出货计划，总和 I: {i_total}**")
             
             return float(i_total), details
             
@@ -886,10 +936,21 @@ class LCACapacityLossProcessor:
             
             # 获取I值（下两个班次的出货计划）
             i_value, i_details = self._get_next_two_shifts_forecast(current_date, current_shift, target_line)
-            if i_details["status"] != "success":
+            
+            # 处理跳出事件的情况
+            if i_details["status"] == "skip_event":
+                return {
+                    "status": "skip_event",
+                    "message": i_details["message"],
+                    "dos_value": 0.0,
+                    "i_details": i_details
+                }
+            
+            # 处理其他错误情况
+            if i_details["status"] not in ["success", "single_forecast_doubled"]:
                 return {
                     "status": "error",
-                    "message": f"获取I值失败: {i_details['message']}",
+                    "message": f"获取I值失败: {i_details.get('message', '未知错误')}",
                     "dos_value": 0.0
                 }
             

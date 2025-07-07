@@ -694,13 +694,17 @@ class EventManager:
             result = lca_processor.process_lca_capacity_loss(event_data)
             
             # 输出处理结果
-            if result["status"] == "add_line_required":
+            if result["status"] == "skip_event":
+                self.log_message("WARNING", f"**{result['message']}**")
+                self.log_message("INFO", f"**最终建议: {result.get('recommendation', 'N/A')}**")
+                
+            elif result["status"] == "add_line_required":
                 self.log_message("WARNING", f"**{result['message']}**")
                 self.log_message("INFO", f"累计损失: {result.get('check_result', {}).get('total_loss', 0):.0f}")
                 
                 # 输出DOS计算结果
                 dos_calc = result.get('dos_calculation', {})
-                if dos_calc.get('status') == 'success':
+                if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
                     self.log_message("INFO", f"**预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
                 else:
                     self.log_message("WARNING", f"DOS计算失败: {dos_calc.get('message', '未知错误')}")
@@ -710,7 +714,7 @@ class EventManager:
                 
                 # 输出DOS计算结果
                 dos_calc = result.get('dos_calculation', {})
-                if dos_calc.get('status') == 'success':
+                if dos_calc.get('status') in ['success', 'single_forecast_doubled']:
                     self.log_message("INFO", f"**预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
                 else:
                     self.log_message("WARNING", f"DOS计算失败: {dos_calc.get('message', '未知错误')}")
