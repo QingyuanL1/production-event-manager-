@@ -36,6 +36,7 @@ class EventManager:
             "LCA产量损失": {
                 "levels": [
                     {"name": "选择影响日期", "type": "date", "source": "daily_plan_dates"},
+                    {"name": "选择影响班次", "type": "dropdown", "source": "shifts"},
                     {"name": "选择产线", "type": "dropdown", "source": "production_lines"},
                     {"name": "确认产品PN", "type": "dropdown", "source": "product_pn"},
                     {"name": "已经损失的产量", "type": "number", "validation": "positive_number"},
@@ -180,8 +181,16 @@ class EventManager:
             
         if source == "daily_plan_dates":
             return self._get_daily_plan_dates()
+        elif source == "shifts":
+            # 如果已选择日期，则根据日期从Daily Plan获取实际班次
+            selected_date = context.get("选择影响日期")
+            if selected_date:
+                return self._get_shifts_for_date(selected_date)
+            else:
+                # 如果没有选择日期，返回默认班次列表
+                return self.data_sources["shifts"]
         elif source == "production_lines":
-            return self._get_production_lines(context.get("选择影响日期"))
+            return self._get_production_lines(context.get("选择影响日期"), context.get("选择影响班次"))
         elif source == "product_pn":
             return self._get_product_pn(context.get("选择影响日期"), context.get("选择产线"))
         elif source in self.data_sources:
@@ -197,33 +206,207 @@ class EventManager:
             if data is None or data.empty:
                 return []
             
-            # 从列名中提取日期
-            date_columns = []
+            # 从列名中提取日期，并去重
+            date_set = set()
             for col in data.columns:
                 if isinstance(col, str) and re.match(r'\d{4}-\d{2}-\d{2}', col):
-                    date_columns.append(col)
+                    date_set.add(col)
             
-            return sorted(date_columns)
+            # 转换为排序的列表
+            date_list = sorted(list(date_set))
+            self.log_message("INFO", f"找到 {len(date_list)} 个可用日期")
+            return date_list
         except Exception as e:
             self.log_message("ERROR", f"获取日期列表时出错: {str(e)}")
             return []
     
-    def _get_production_lines(self, date: str = None) -> List[str]:
-        """获取可用的生产线列表"""
+    def _get_shifts_for_date(self, date: str) -> List[str]:
+        """
+        根据指定日期从Daily Plan获取该日期实际存在的班次
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式)
+            
+        Returns:
+            该日期存在的班次列表
+        """
         try:
+            # 直接读取Excel文件以获取三级表头信息
+            file_path = "data/daily plan.xlsx"
+            df_with_shifts = pd.read_excel(file_path, sheet_name=0, header=[0,1,2])
+            
+            # 提取指定日期的班次
+            available_shifts = set()
+            
+            for col in df_with_shifts.columns:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    # 三级表头格式：(日期, 星期, 班次)
+                    date_obj = col[0]
+                    shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = None
+                    if hasattr(date_obj, 'strftime'):
+                        # datetime对象
+                        formatted_date = date_obj.strftime('%Y-%m-%d')
+                    elif isinstance(date_obj, str):
+                        # 字符串格式，如"1-Mar"
+                        if '-' in date_obj:
+                            try:
+                                day, month = date_obj.split('-')
+                                month_map = {
+                                    'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                    'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
+                                    'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                                }
+                                if month in month_map:
+                                    formatted_date = f"2025-{month_map[month]}-{day.zfill(2)}"
+                            except:
+                                continue
+                    
+                    # 如果日期匹配且是有效班次，添加到集合中
+                    if formatted_date == date and shift in ['T1', 'T2', 'T3', 'T4']:
+                        available_shifts.add(shift)
+            
+            # 按班次顺序排序
+            shift_order = ['T1', 'T2', 'T3', 'T4']
+            result = [shift for shift in shift_order if shift in available_shifts]
+            
+            self.log_message("INFO", f"日期 {date} 的可用班次: {result}")
+            return result
+            
+        except Exception as e:
+            self.log_message("ERROR", f"获取日期 {date} 的班次时出错: {str(e)}")
+            # 出错时返回默认班次列表
+            return self.data_sources["shifts"]
+    
+    def _get_production_lines(self, date: str = None, shift: str = None) -> List[str]:
+        """
+        获取可用的生产线列表，可根据日期和班次过滤
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式)
+            shift: 班次字符串 (T1, T2, T3, T4)
+            
+        Returns:
+            生产线列表
+        """
+        try:
+            # 如果提供了日期和班次，从Daily Plan的对应列获取有数据的生产线
+            if date and shift:
+                return self._get_lines_for_date_shift(date, shift)
+            
+            # 否则从扁平化的Daily Plan获取所有生产线
             data = self.data_loader.get_data("HSA Daily Plan")
             if data is None or data.empty:
                 return []
             
             # 从第一列（Line列）获取生产线
             lines = data.iloc[:, 0].dropna().unique().tolist()
-            # 过滤掉空值和非字符串值
-            lines = [str(line) for line in lines if pd.notna(line) and str(line).strip()]
+            # 过滤掉空值和非字符串值，并且只保留F+数字格式的产线
+            lines = [str(line) for line in lines if pd.notna(line) and str(line).strip() and re.match(r'^F\d+$', str(line).strip())]
             
             return sorted(lines)
         except Exception as e:
             self.log_message("ERROR", f"获取生产线列表时出错: {str(e)}")
             return []
+    
+    def _get_lines_for_date_shift(self, date: str, shift: str) -> List[str]:
+        """
+        根据指定日期和班次从Daily Plan获取有生产计划的产线列表
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式) 
+            shift: 班次字符串 (T1, T2, T3, T4)
+            
+        Returns:
+            该日期班次有生产计划的产线列表
+        """
+        try:
+            # 直接读取Excel文件以获取三级表头信息
+            file_path = "data/daily plan.xlsx"
+            df_with_shifts = pd.read_excel(file_path, sheet_name=0, header=[0,1,2])
+            
+            # 找到匹配日期和班次的列
+            target_column = None
+            for col in df_with_shifts.columns:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    date_obj = col[0]
+                    col_shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = None
+                    if hasattr(date_obj, 'strftime'):
+                        formatted_date = date_obj.strftime('%Y-%m-%d')
+                    elif isinstance(date_obj, str) and '-' in date_obj:
+                        try:
+                            day, month = date_obj.split('-')
+                            month_map = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            }
+                            if month in month_map:
+                                formatted_date = f"2025-{month_map[month]}-{day.zfill(2)}"
+                        except:
+                            continue
+                    
+                    # 找到匹配的日期和班次列
+                    if formatted_date == date and col_shift == shift:
+                        target_column = col
+                        break
+            
+            if target_column is None:
+                self.log_message("WARNING", f"未找到 {date} {shift} 对应的数据列")
+                return []
+            
+            # 获取该列有数据的生产线
+            lines_with_data = []
+            
+            # 找到Line列（通常是第一列）
+            line_column = None
+            for col in df_with_shifts.columns:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    # 检查三级表头的任何一级是否包含Line
+                    if ('Line' in str(col[0]) or 'Line' in str(col[1]) or 
+                        'Line' in str(col[2]) or col[0] == 'Line'):
+                        line_column = col
+                        break
+                elif isinstance(col, str) and 'Line' in col:
+                    line_column = col
+                    break
+            
+            # 如果还没找到，尝试第一列（通常是Line列）
+            if line_column is None and len(df_with_shifts.columns) > 0:
+                line_column = df_with_shifts.columns[0]
+                self.log_message("INFO", f"使用第一列作为Line列: {line_column}")
+            
+            if line_column is None:
+                self.log_message("WARNING", "未找到Line列")
+                return []
+            
+            # 检查每行的生产线和对应的目标列数据
+            for idx, row in df_with_shifts.iterrows():
+                line_name = row[line_column]
+                target_value = row[target_column]
+                
+                # 如果生产线名称有效且目标列有数据（非空且非0）
+                if (pd.notna(line_name) and str(line_name).strip() and 
+                    pd.notna(target_value) and target_value != 0):
+                    line_str = str(line_name).strip()
+                    
+                    # 只包含F+数字格式的产线（实际生产线，如F16, F25等）
+                    if (re.match(r'^F\d+$', line_str) and line_str not in lines_with_data):
+                        lines_with_data.append(line_str)
+            
+            result = sorted(lines_with_data)
+            self.log_message("INFO", f"日期 {date} 班次 {shift} 的可用产线: {result}")
+            return result
+            
+        except Exception as e:
+            self.log_message("ERROR", f"获取日期 {date} 班次 {shift} 的产线时出错: {str(e)}")
+            # 出错时返回所有产线
+            return self._get_production_lines()
     
     def _get_product_pn(self, date: str = None, line: str = None) -> List[str]:
         """根据日期和生产线获取产品PN列表"""
@@ -409,8 +592,8 @@ class EventManager:
         if not is_valid:
             return False, error_msg
         
-        # 如果是LCA产能损失事件，从Daily Plan获取实际数据
-        if event_data.get("事件类型") == "LCA产能损失":
+        # 如果是LCA产量损失事件，从Daily Plan获取实际数据
+        if event_data.get("事件类型") == "LCA产量损失":
             self._enhance_lca_event_data(event_data)
         
         # 使用数据库管理器创建事件
@@ -419,8 +602,8 @@ class EventManager:
         if success:
             self.log_message("SUCCESS", f"事件创建成功: {event_data.get('事件ID', 'Unknown')} - {event_data.get('事件类型', 'Unknown')}")
             
-            # 如果是LCA产能损失事件，自动执行处理逻辑
-            if event_data.get("事件类型") == "LCA产能损失":
+            # 如果是LCA产量损失事件，自动执行处理逻辑
+            if event_data.get("事件类型") == "LCA产量损失":
                 self._execute_lca_processing(event_data)
         
         return success, message

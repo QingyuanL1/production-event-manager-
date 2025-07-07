@@ -50,7 +50,10 @@ class ProductionSchedulingSystem:
         self.log_message("INFO", "系统初始化完成")
         self.log_message("INFO", f"当前时间: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         self.log_message("INFO", "使用默认配置")
-        self.log_message("INFO", "自动加载线程已启动")
+        
+        # Auto-load all data tables
+        self.auto_load_all_data()
+        
         self.log_message("SUCCESS", "生产排班系统启动成功")
         
     def setup_ui(self):
@@ -314,6 +317,118 @@ class ProductionSchedulingSystem:
             self.root.after(0, lambda: self.on_data_loaded(success, message, data_type))
             
         threading.Thread(target=load_thread).start()
+    
+    def auto_load_all_data(self):
+        """
+        自动加载所有必需的数据表
+        """
+        self.log_message("INFO", "开始自动加载所有数据表...")
+        
+        # 定义需要加载的数据表
+        data_tables = [
+            "HSA Daily Plan",
+            "HSA FG EOH", 
+            "HSA Capacity",
+            "Learning Curve"
+        ]
+        
+        # 用于跟踪加载进度
+        self.auto_load_progress = {
+            "total": len(data_tables),
+            "completed": 0,
+            "success": 0,
+            "failed": 0
+        }
+        
+        # 依次加载每个表
+        for data_type in data_tables:
+            self.auto_load_single_data(data_type)
+    
+    def auto_load_single_data(self, data_type):
+        """
+        自动加载单个数据表
+        
+        Args:
+            data_type: 要加载的数据类型
+        """
+        self.log_message("INFO", f"正在加载 {data_type}...")
+        
+        def load_thread():
+            success, message, data = self.data_loader.load_data(data_type)
+            
+            # 在主线程中更新UI
+            self.root.after(0, lambda: self.on_auto_data_loaded(success, message, data_type))
+            
+        threading.Thread(target=load_thread).start()
+    
+    def on_auto_data_loaded(self, success, message, data_type):
+        """
+        自动加载数据完成的回调
+        
+        Args:
+            success: 是否加载成功
+            message: 结果消息
+            data_type: 数据类型
+        """
+        self.auto_load_progress["completed"] += 1
+        
+        if success:
+            self.auto_load_progress["success"] += 1
+            self.log_message("SUCCESS", message)
+        else:
+            self.auto_load_progress["failed"] += 1
+            self.log_message("ERROR", message)
+        
+        # 检查是否所有数据都已加载完成
+        if self.auto_load_progress["completed"] == self.auto_load_progress["total"]:
+            self.on_auto_load_complete()
+    
+    def on_auto_load_complete(self):
+        """
+        所有数据自动加载完成的回调
+        """
+        success_count = self.auto_load_progress["success"]
+        failed_count = self.auto_load_progress["failed"]
+        total_count = self.auto_load_progress["total"]
+        
+        if failed_count == 0:
+            self.log_message("SUCCESS", f"✅ 所有数据表加载完成！({success_count}/{total_count})")
+        else:
+            self.log_message("WARNING", f"⚠️  数据加载完成，但有失败项：成功 {success_count}，失败 {failed_count}")
+        
+        # 设置默认显示的数据类型
+        if success_count > 0:
+            # 优先显示 HSA Daily Plan
+            if self.data_loader.get_data("HSA Daily Plan") is not None:
+                self.current_data_type.set("HSA Daily Plan")
+            else:
+                # 如果没有，显示第一个成功加载的
+                for data_type in ["HSA FG EOH", "HSA Capacity", "Learning Curve"]:
+                    if self.data_loader.get_data(data_type) is not None:
+                        self.current_data_type.set(data_type)
+                        break
+            
+            # 更新UI组件
+            self.update_ui_after_auto_load()
+    
+    def update_ui_after_auto_load(self):
+        """
+        自动加载完成后更新UI组件
+        """
+        # 更新数据类型下拉框
+        current_type = self.current_data_type.get()
+        if current_type:
+            # 更新工作表下拉列表
+            sheet_names = self.data_loader.get_sheet_names(current_type)
+            if hasattr(self, 'sheet_combobox'):
+                self.sheet_combobox['values'] = sheet_names
+                
+                # 选择默认工作表
+                if sheet_names:
+                    self.current_sheet.set(sheet_names[0])
+                    
+                # 刷新数据预览
+                self.refresh_data_preview()
         
     def on_data_loaded(self, success, message, data_type):
         """

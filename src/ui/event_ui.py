@@ -76,7 +76,7 @@ class EventFormUI:
         self.preview_btn = ttk.Button(button_frame, text="预览事件", command=self.preview_event, state=tk.DISABLED)
         self.preview_btn.pack(side=tk.LEFT, padx=5)
         
-        self.save_btn = ttk.Button(button_frame, text="保存事件", command=self.save_event, state=tk.DISABLED)
+        self.save_btn = ttk.Button(button_frame, text="提交事件", command=self.save_event, state=tk.DISABLED)
         self.save_btn.pack(side=tk.LEFT, padx=5)
         
         # 事件列表区域
@@ -101,6 +101,9 @@ class EventFormUI:
         # 事件操作按钮
         event_btn_frame = ttk.Frame(list_frame)
         event_btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        execute_btn = ttk.Button(event_btn_frame, text="执行选中事件", command=self.execute_selected_event)
+        execute_btn.pack(side=tk.LEFT, padx=5)
         
         delete_btn = ttk.Button(event_btn_frame, text="删除选中事件", command=self.delete_selected_event)
         delete_btn.pack(side=tk.LEFT, padx=5)
@@ -382,24 +385,78 @@ class EventFormUI:
     
     def on_field_changed(self, event=None):
         """当字段值改变时，更新相关联的字段选项"""
-        # 更新产线相关的选项
-        if "选择影响日期" in self.form_variables:
-            date_value = self.form_variables["选择影响日期"].get()
-            if date_value and "选择产线" in self.form_widgets:
-                # 更新产线选项
-                lines = self.event_manager._get_production_lines(date_value)
-                self.form_widgets["选择产线"]["values"] = lines
+        # 获取触发事件的组件
+        triggered_widget = event.widget if event else None
+        triggered_field = None
         
-        # 更新产品PN相关的选项
-        if "选择影响日期" in self.form_variables and "选择产线" in self.form_variables:
-            date_value = self.form_variables["选择影响日期"].get()
-            line_value = self.form_variables["选择产线"].get()
-            if date_value and line_value and "确认产品PN" in self.form_widgets:
-                # 更新产品PN选项
-                pns = self.event_manager._get_product_pn(date_value, line_value)
-                self.form_widgets["确认产品PN"]["values"] = pns
+        # 找到触发字段的名称
+        for field_name, widget in self.form_widgets.items():
+            if widget == triggered_widget:
+                triggered_field = field_name
+                break
         
-        self.log_message("INFO", "字段关联更新完成")
+        # 构建当前表单上下文
+        context = {}
+        for field_name, var in self.form_variables.items():
+            if var.get():
+                context[field_name] = var.get()
+        
+        self.log_message("INFO", f"字段变更: {triggered_field} = {context.get(triggered_field, '')}")
+        
+        # 1. 当日期改变时，更新班次选项
+        if triggered_field == "选择影响日期" and "选择影响班次" in self.form_widgets:
+            date_value = context.get("选择影响日期")
+            if date_value:
+                shifts = self.event_manager.get_data_source_options("shifts", context)
+                self.form_widgets["选择影响班次"]["values"] = shifts
+                
+                # 检查当前班次是否还有效，如果无效则清空
+                current_shift = self.form_variables["选择影响班次"].get()
+                if current_shift and current_shift not in shifts:
+                    self.form_variables["选择影响班次"].set("")
+                    # 清空依赖班次的字段
+                    if "选择产线" in self.form_variables:
+                        self.form_variables["选择产线"].set("")
+                        self.form_widgets["选择产线"]["values"] = []
+                    if "确认产品PN" in self.form_variables:
+                        self.form_variables["确认产品PN"].set("")
+                        self.form_widgets["确认产品PN"]["values"] = []
+                
+                self.log_message("INFO", f"日期 {date_value} 的班次选项已更新: {shifts}")
+        
+        # 2. 当日期或班次改变时，更新产线选项
+        if (triggered_field in ["选择影响日期", "选择影响班次"] and 
+            "选择影响日期" in context and "选择影响班次" in context and 
+            "选择产线" in self.form_widgets):
+            
+            lines = self.event_manager.get_data_source_options("production_lines", context)
+            self.form_widgets["选择产线"]["values"] = lines
+            
+            # 检查当前产线是否还有效，如果无效则清空
+            current_line = self.form_variables["选择产线"].get()
+            if current_line and current_line not in lines:
+                self.form_variables["选择产线"].set("")
+                # 清空依赖产线的字段
+                if "确认产品PN" in self.form_variables:
+                    self.form_variables["确认产品PN"].set("")
+                    self.form_widgets["确认产品PN"]["values"] = []
+            
+            self.log_message("INFO", f"产线选项已更新，共 {len(lines)} 个")
+        
+        # 3. 当产线改变时，更新产品PN选项
+        if (triggered_field in ["选择影响日期", "选择影响班次", "选择产线"] and 
+            "选择影响日期" in context and "选择产线" in context and 
+            "确认产品PN" in self.form_widgets):
+            
+            pns = self.event_manager.get_data_source_options("product_pn", context)
+            self.form_widgets["确认产品PN"]["values"] = pns
+            
+            # 检查当前PN是否还有效，如果无效则清空
+            current_pn = self.form_variables["确认产品PN"].get()
+            if current_pn and current_pn not in pns:
+                self.form_variables["确认产品PN"].set("")
+            
+            self.log_message("INFO", f"产品PN选项已更新，共 {len(pns)} 个")
     
     def build_level(self, level: int, level_configs: List[Dict], branch_name: str = None):
         """
@@ -682,12 +739,12 @@ class EventFormUI:
         return event_data
     
     def save_event(self):
-        """保存事件"""
+        """提交并处理事件"""
         # 收集表单数据
         event_data = self.collect_form_data()
         
         if not event_data or len(event_data) <= 1:  # 只有事件类型
-            messagebox.showwarning("保存失败", "请先填写事件信息")
+            messagebox.showwarning("提交失败", "请先填写事件信息")
             return
         
         # 验证必填字段
@@ -700,8 +757,8 @@ class EventFormUI:
         success, message = self.event_manager.create_event(event_data)
         
         if success:
-            messagebox.showinfo("保存成功", message)
-            self.log_message("SUCCESS", f"事件保存成功: {message}")
+            messagebox.showinfo("提交成功", message)
+            self.log_message("SUCCESS", f"事件提交成功: {message}")
             
             # 刷新事件列表
             self.refresh_event_list()
@@ -709,8 +766,8 @@ class EventFormUI:
             # 重置表单
             self.reset_form()
         else:
-            messagebox.showerror("保存失败", message)
-            self.log_message("ERROR", f"事件保存失败: {message}")
+            messagebox.showerror("提交失败", message)
+            self.log_message("ERROR", f"事件提交失败: {message}")
     
     def validate_required_fields(self, event_data: Dict[str, Any]) -> tuple:
         """验证必填字段"""
@@ -723,7 +780,7 @@ class EventFormUI:
         
         # 根据事件类型添加特定必填字段
         if event_type in ["LCA产量损失", "物料情况"]:
-            required_fields.extend(["选择产线", "确认产品PN"])
+            required_fields.extend(["选择影响班次", "选择产线", "确认产品PN"])
         elif event_type in ["SBR信息", "PM状态", "Drive loading计划"]:
             required_fields.extend(["选择影响班次", "选择产线"])
         
@@ -749,6 +806,183 @@ class EventFormUI:
                 event.get("创建时间", ""),
                 "已创建"
             ))
+    
+    def execute_selected_event(self):
+        """执行选中的事件"""
+        selected_items = self.event_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("执行失败", "请先选择要执行的事件")
+            return
+        
+        if len(selected_items) > 1:
+            messagebox.showwarning("执行失败", "请只选择一个事件进行执行")
+            return
+        
+        # 获取选中的事件ID
+        item = selected_items[0]
+        event_id = self.event_tree.item(item)["values"][0]
+        event_type = self.event_tree.item(item)["values"][1]
+        
+        # 确认执行
+        if messagebox.askyesno("确认执行", f"确定要执行事件 {event_id} ({event_type}) 吗？\n\n这将重新运行事件的处理逻辑并显示详细流程。"):
+            self.log_message("INFO", f"开始执行事件: {event_id}")
+            
+            # 从数据库获取事件数据
+            event_data = self.get_event_data_by_id(event_id)
+            if event_data:
+                self.log_message("INFO", f"📋 事件详情: {event_type}")
+                for key, value in event_data.items():
+                    if key not in ["事件ID", "创建时间"] and value:  # 跳过ID和时间戳
+                        self.log_message("INFO", f"   {key}: {value}")
+                
+                # 根据事件类型执行相应的处理逻辑
+                self.execute_event_logic(event_data)
+            else:
+                messagebox.showerror("执行失败", f"无法获取事件 {event_id} 的数据")
+                self.log_message("ERROR", f"无法获取事件数据: {event_id}")
+    
+    def get_event_data_by_id(self, event_id):
+        """根据事件ID获取事件数据"""
+        try:
+            events = self.event_manager.get_events()
+            for event in events:
+                if event.get("事件ID") == event_id:
+                    return event
+            return None
+        except Exception as e:
+            self.log_message("ERROR", f"获取事件数据失败: {str(e)}")
+            return None
+    
+    def execute_event_logic(self, event_data):
+        """执行事件的业务逻辑"""
+        event_type = event_data.get("事件类型")
+        
+        try:
+            if event_type == "LCA产量损失":
+                self.log_message("INFO", "🚀 开始执行LCA产量损失处理逻辑...")
+                self.execute_lca_logic(event_data)
+            elif event_type == "物料情况":
+                self.log_message("INFO", "🚀 开始执行物料情况处理逻辑...")
+                self.log_message("INFO", "物料情况事件处理逻辑暂未实现")
+            elif event_type == "SBR信息":
+                self.log_message("INFO", "🚀 开始执行SBR信息处理逻辑...")
+                self.log_message("INFO", "SBR信息事件处理逻辑暂未实现")
+            elif event_type == "PM状态":
+                self.log_message("INFO", "🚀 开始执行PM状态处理逻辑...")
+                self.log_message("INFO", "PM状态事件处理逻辑暂未实现")
+            elif event_type == "Drive loading计划":
+                self.log_message("INFO", "🚀 开始执行Drive loading计划处理逻辑...")
+                self.log_message("INFO", "Drive loading计划事件处理逻辑暂未实现")
+            else:
+                self.log_message("WARNING", f"未知的事件类型: {event_type}")
+                
+        except Exception as e:
+            self.log_message("ERROR", f"执行事件逻辑时发生错误: {str(e)}")
+    
+    def execute_lca_logic(self, event_data):
+        """执行LCA产量损失处理逻辑"""
+        try:
+            # 创建LCA处理器并执行处理
+            from src.core.lca_capacity_loss import LCACapacityLossProcessor
+            
+            # 创建LCA处理器，使用GUI的日志回调
+            class GUILoggerAdapter:
+                def __init__(self, log_callback):
+                    self.log_callback = log_callback
+                
+                def info(self, message):
+                    self.log_callback("INFO", message)
+                
+                def error(self, message):
+                    self.log_callback("ERROR", message)
+                
+                def warning(self, message):
+                    self.log_callback("WARNING", message)
+                
+                def debug(self, message):
+                    self.log_callback("DEBUG", message)
+            
+            # 获取data_loader实例
+            data_loader = self.event_manager.data_loader
+            logger = GUILoggerAdapter(self.log_message)
+            
+            lca_processor = LCACapacityLossProcessor(data_loader, logger)
+            
+            # 执行LCA处理逻辑
+            result = lca_processor.process_lca_capacity_loss(event_data)
+            
+            # 显示处理结果
+            self.display_lca_result(result)
+            
+        except Exception as e:
+            self.log_message("ERROR", f"执行LCA处理逻辑时发生错误: {str(e)}")
+    
+    def display_lca_result(self, result):
+        """显示LCA处理结果"""
+        self.log_message("INFO", "=" * 50)
+        self.log_message("INFO", "📊 LCA处理结果总结:")
+        
+        status = result.get("status", "unknown")
+        message = result.get("message", "无消息")
+        
+        if status == "add_line_required":
+            self.log_message("WARNING", f"🏭 {message}")
+            check_result = result.get("check_result", {})
+            total_loss = check_result.get("total_loss", 0)
+            self.log_message("INFO", f"📈 累计损失: {total_loss:.0f}")
+            self.log_message("INFO", "🔧 建议操作: 考虑增加生产线")
+        elif status == "normal_process":
+            self.log_message("INFO", f"ℹ️  {message}")
+            
+            # 显示DOS计算结果
+            dos_result = result.get("dos_result", {})
+            if dos_result.get("success"):
+                self.display_dos_result(dos_result)
+            else:
+                self.log_message("WARNING", f"DOS计算失败: {dos_result.get('error', '未知错误')}")
+            
+            recommendation = result.get("recommendation", "按标准流程处理")
+            self.log_message("INFO", f"✅ 最终建议: {recommendation}")
+        elif status == "error":
+            self.log_message("ERROR", f"❌ {message}")
+        
+        self.log_message("INFO", "=" * 50)
+    
+    def display_dos_result(self, dos_result):
+        """显示DOS计算结果详情"""
+        self.log_message("INFO", "")
+        self.log_message("INFO", "🔮 DOS计算结果详情:")
+        
+        # 显示计算过程
+        previous_eoh = dos_result.get("previous_eoh", 0)
+        planned_production = dos_result.get("planned_production", 0)
+        actual_production = dos_result.get("actual_production", 0)
+        current_shipment = dos_result.get("current_shipment", 0)
+        predicted_eoh = dos_result.get("predicted_eoh", 0)
+        new_dos = dos_result.get("new_dos", 0)
+        
+        self.log_message("INFO", f"📦 上一班次EOH: {previous_eoh}")
+        self.log_message("INFO", f"🏭 损失后实际产量: {actual_production} (计划: {planned_production})")
+        self.log_message("INFO", f"🚛 本班出货计划: {current_shipment}")
+        self.log_message("INFO", f"📈 预计EOH: {predicted_eoh}")
+        
+        # 显示DOS分析
+        analysis = dos_result.get("analysis", {})
+        dos_level = analysis.get("level", "未知")
+        dos_status = analysis.get("status", "unknown")
+        dos_message = analysis.get("message", "")
+        
+        if dos_status == "critical":
+            self.log_message("ERROR", f"🚨 {dos_message}")
+        elif dos_status == "warning":
+            self.log_message("WARNING", f"⚠️  {dos_message}")
+        elif dos_status == "caution":
+            self.log_message("INFO", f"⚠️  {dos_message}")
+        else:
+            self.log_message("INFO", f"✅ {dos_message}")
+        
+        if new_dos != float('inf'):
+            self.log_message("INFO", f"📊 新DOS值: {new_dos:.2f} 天 (状态: {dos_level})")
     
     def delete_selected_event(self):
         """删除选中的事件"""

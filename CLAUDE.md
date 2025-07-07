@@ -68,7 +68,20 @@ python src/utils/explore_data.py
    - Provides result export functionality
    - Integrates with data_loader for accessing production data
 
-6. **explore_data.py** - Development utility for examining Excel file structure
+6. **lca_capacity_loss.py** - LCA capacity loss processing module
+   - Contains `LCACapacityLossProcessor` class for handling LCA capacity loss events
+   - Implements 3-shift loss tracking and validation logic
+   - Checks if cumulative losses exceed 10K threshold across previous shifts
+   - Integrates with event data to determine when additional production lines are needed
+   - Provides detailed logging and result tracking for LCA processing decisions
+
+7. **database_manager.py** - Database management for event persistence
+   - SQLite database integration for storing events and processing results
+   - Event CRUD operations with proper data validation
+   - Export functionality for event data to Excel format
+   - Database statistics and maintenance operations
+
+8. **explore_data.py** - Development utility for examining Excel file structure
 
 ### Data Sources
 
@@ -85,6 +98,9 @@ The system works with Excel files in the `数据表/` directory:
 3. **Selective Data Processing**: Only specific columns get forward-filled (Lines, Product, etc.) rather than global forward-filling
 4. **Threading**: Data loading operations use background threads to keep UI responsive
 5. **Column Name Cleaning**: Automatic handling of datetime column formats and cleanup
+6. **Event-Driven Processing**: Events trigger automatic processing workflows (e.g., LCA events auto-execute capacity loss analysis)
+7. **Database Persistence**: All events and processing results are stored in SQLite database for tracking and analysis
+8. **Cascading Validation**: Multi-level data validation ensures consistency across event data and production plans
 
 ### UI Structure
 
@@ -110,8 +126,11 @@ The system works with Excel files in the `数据表/` directory:
 - ✅ Data validation and logical consistency checks
 - ✅ Event export functionality
 - ✅ Event processing framework with EventProcessor class
-- ✅ Basic event processing logic for all event types
-- ⚠️ Event processing algorithms (framework complete, business logic partially implemented)
+- ✅ LCA capacity loss processing logic (完整实现)
+- ✅ Database integration for event storage (SQLite)
+- ✅ Automatic LCA processing on event creation
+- ✅ Multi-shift loss tracking and validation
+- ⚠️ Other event type processing algorithms (framework complete, business logic partially implemented)
 - ❌ Result analysis (placeholder)
 - ❌ Production plan adjustment logic
 - ❌ Capacity calculation and optimization algorithms
@@ -124,3 +143,16 @@ When extending this system:
 3. Maintain the sheet-aware data loading pattern for multi-sheet files
 4. Preserve the selective column processing approach (avoid global operations)
 5. Update the status display and logging for new features
+6. New event types should follow the existing cascading form pattern in `EventManager`
+7. All event processing should use the established pattern: create processor class, implement validation, add database persistence
+8. Use the existing logger adapters for consistent logging across modules
+9. Test new event types thoroughly with real data from the `data/` directory
+
+## Important Files and Directories
+
+- `data/events.db` - SQLite database storing all events and processing results
+- `data/daily plan.xlsx` - Primary production schedule data source
+- `debug_*.py` - Various debug scripts for testing specific functionality
+- `test_*.py` - Test scripts for different components
+- `功能说明.md` - Feature documentation in Chinese
+- `docs/` - Contains project documentation and requirements in Chinese
