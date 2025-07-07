@@ -101,6 +101,9 @@ The system works with Excel files in the `数据表/` directory:
 6. **Event-Driven Processing**: Events trigger automatic processing workflows (e.g., LCA events auto-execute capacity loss analysis)
 7. **Database Persistence**: All events and processing results are stored in SQLite database for tracking and analysis
 8. **Cascading Validation**: Multi-level data validation ensures consistency across event data and production plans
+9. **Smart Cascading Selection**: GUI form fields dynamically update based on user selections, fetching real data from Daily Plan
+10. **Context-Aware Data Sources**: Data options change based on previous selections (date → shifts → production lines → products)
+11. **Intelligent Field Validation**: Only clears dependent fields when selections become invalid, preserving user choices
 
 ### UI Structure
 
@@ -130,6 +133,9 @@ The system works with Excel files in the `数据表/` directory:
 - ✅ Database integration for event storage (SQLite)
 - ✅ Automatic LCA processing on event creation
 - ✅ Multi-shift loss tracking and validation
+- ✅ **GUI cascading selection system (智能级联选择)**
+- ✅ **Dynamic data source integration (动态数据源集成)**
+- ✅ **Production line filtering (F-series only)**
 - ⚠️ Other event type processing algorithms (framework complete, business logic partially implemented)
 - ❌ Result analysis (placeholder)
 - ❌ Production plan adjustment logic
@@ -147,6 +153,23 @@ When extending this system:
 7. All event processing should use the established pattern: create processor class, implement validation, add database persistence
 8. Use the existing logger adapters for consistent logging across modules
 9. Test new event types thoroughly with real data from the `data/` directory
+10. When adding new cascading form fields, follow the pattern in EventManager.get_data_source_options()
+11. Always implement both static fallback data and dynamic context-aware data sources
+12. Use regex filtering for production line validation to maintain F-series only display
+
+## Recent Major Updates (Level 3 Priority for New Developers)
+
+### GUI Cascading Selection System (December 2024)
+- **Problem Solved**: Event forms were using static dropdown options instead of dynamic data from Daily Plan
+- **Solution**: Implemented smart cascading selection with context-aware data sources
+- **Key Files Modified**: `src/core/event_manager.py`, `src/ui/event_ui.py`
+- **Behavior**: Date selection → updates available shifts → updates production lines → updates product PNs
+- **Technical Details**: Uses three-level header parsing from Excel, regex filtering for F-series lines only
+
+### Production Line Filtering Enhancement
+- **Requirement**: Only show actual production lines (F16, F25, F29, etc.), not system entries
+- **Implementation**: Regex pattern `^F\d+$` filters production lines in both backend and GUI
+- **Impact**: Cleaner UI, prevents selection of invalid production lines like "Forecast", "LCA", "SBR"
 
 ## Important Files and Directories
 
