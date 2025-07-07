@@ -935,11 +935,11 @@ class EventFormUI:
             self.log_message("INFO", f"ℹ️  {message}")
             
             # 显示DOS计算结果
-            dos_result = result.get("dos_result", {})
-            if dos_result.get("success"):
-                self.display_dos_result(dos_result)
-            else:
-                self.log_message("WARNING", f"DOS计算失败: {dos_result.get('error', '未知错误')}")
+            dos_calc = result.get("dos_calculation", {})
+            if dos_calc and dos_calc.get('status') in ['success', 'single_forecast_doubled']:
+                self.log_message("INFO", f"🆕 **预测损失后新DOS: {dos_calc.get('dos_value', 0):.2f} 天**")
+            elif dos_calc:
+                self.log_message("WARNING", f"DOS计算失败: {dos_calc.get('message', '未知错误')}")
             
             recommendation = result.get("recommendation", "按标准流程处理")
             self.log_message("INFO", f"✅ 最终建议: {recommendation}")

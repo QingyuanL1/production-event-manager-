@@ -274,8 +274,8 @@ class LCACapacityLossProcessor:
             frame = inspect.currentframe()
             caller_name = frame.f_back.f_code.co_name if frame.f_back else ""
             
-            if target_line and caller_name == "_get_next_two_shifts_forecast":
-                # 这是DOS计算中的I值获取，使用产线行数据
+            if target_line and (caller_name == "_get_next_two_shifts_forecast" or caller_name == "_calculate_new_dos"):
+                # 这是DOS计算中的I值获取或H值获取，使用产线行数据
                 target_line_row = None
                 for idx, row in df_with_shifts.iterrows():
                     line_value = row[line_column]
@@ -944,8 +944,8 @@ class LCACapacityLossProcessor:
             # 获取F值（本班预计产量）
             f_value = forecast_calculation.get("F", 0.0)
             
-            # 获取H值（本班出货计划，即E值）
-            h_value = forecast_calculation.get("E", 0.0)
+            # 获取H值（本班安排产量 - 产线PN在当前班次的值）
+            h_value = self._get_forecast_value(current_date, current_shift, target_line)
             
             self.logger.info(f"DOS计算参数:")
             self.logger.info(f"   PN: {part_number}")
@@ -996,7 +996,7 @@ class LCACapacityLossProcessor:
             self.logger.info("🧮 **DOS计算公式: (G+F-H)/I**")
             self.logger.info(f"   📎 G (上一个班的合计EOH): {g_value}")
             self.logger.info(f"   🎯 F (本班预计产量): {f_value}")
-            self.logger.info(f"   📈 H (本班出货计划): {h_value}")
+            self.logger.info(f"   📈 H (本班安排产量): {h_value}")
             self.logger.info(f"   📅 I (下两个班次出货计划): {i_value}")
             self.logger.info(f"   📊 计算过程: ({g_value} + {f_value} - {h_value}) / {i_value}")
             self.logger.info(f"   🆕 **预测损失后新DOS: {dos_value:.2f} 天**")
