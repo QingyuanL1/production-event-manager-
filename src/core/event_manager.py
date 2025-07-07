@@ -630,7 +630,7 @@ class EventManager:
     
     def _enhance_lca_event_data(self, event_data: Dict) -> None:
         """
-        增强LCA事件数据，从Daily Plan获取实际数据
+        增强LCA事件数据，从Daily Plan获取实际数据并计算预测产量
         
         Args:
             event_data: 事件数据字典（会被修改）
@@ -648,6 +648,22 @@ class EventManager:
                     self.log_message("INFO", f"从Daily Plan获取计划产量: {planned_qty}")
                 else:
                     self.log_message("WARNING", f"无法从Daily Plan获取产量数据: {date}, {line}, {product_pn}")
+            
+            # 计算本班预测产量 F = E - C - D * (E/11)
+            shift_forecast_result = self.calculate_shift_forecast(event_data)
+            event_data["_shift_forecast_calculation"] = shift_forecast_result
+            
+            if shift_forecast_result["status"] == "success":
+                self.log_message("SUCCESS", f"📊 {shift_forecast_result['message']}")
+                self.log_message("INFO", f"📈 本班预测产量详情:")
+                self.log_message("INFO", f"   E (本班出货计划): {shift_forecast_result['E']}")
+                self.log_message("INFO", f"   C (已损失产量): {shift_forecast_result['C']}")
+                self.log_message("INFO", f"   D (剩余修理时间): {shift_forecast_result['D']}小时")
+                self.log_message("INFO", f"   每小时产能损失: {shift_forecast_result['capacity_loss_per_hour']:.2f}")
+                self.log_message("INFO", f"   总产能损失: {shift_forecast_result['total_capacity_loss']:.2f}")
+                self.log_message("INFO", f"   F (本班预测产量): {shift_forecast_result['F']:.2f}")
+            else:
+                self.log_message("ERROR", f"❌ 预测产量计算失败: {shift_forecast_result['message']}")
             
             # 验证损失产量是否合理
             lost_qty = event_data.get("已经损失的产量")
@@ -708,3 +724,152 @@ class EventManager:
     def get_database_stats(self) -> Dict[str, Any]:
         """获取数据库统计信息"""
         return self.db_manager.get_database_stats()
+    
+    def get_forecast_value(self, date: str, shift: str) -> float:
+        """
+        从Daily Plan获取指定日期班次的forecast值（本班出货计划 E）
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式)
+            shift: 班次字符串 (T1, T2, T3, T4)
+            
+        Returns:
+            forecast值，如果未找到返回0.0
+        """
+        try:
+            # 直接读取Excel文件以获取三级表头信息
+            file_path = "data/daily plan.xlsx"
+            df_with_shifts = pd.read_excel(file_path, sheet_name=0, header=[0,1,2])
+            
+            # 找到目标日期和班次对应的列
+            target_column = None
+            for col in df_with_shifts.columns:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    date_obj = col[0]
+                    col_shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = None
+                    if hasattr(date_obj, 'strftime'):
+                        formatted_date = date_obj.strftime('%Y-%m-%d')
+                    elif isinstance(date_obj, str) and '-' in date_obj:
+                        try:
+                            day, month = date_obj.split('-')
+                            month_map = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            }
+                            if month in month_map:
+                                formatted_date = f"2025-{month_map[month]}-{day.zfill(2)}"
+                        except:
+                            continue
+                    
+                    # 找到匹配的日期和班次列
+                    if formatted_date == date and col_shift == shift:
+                        target_column = col
+                        break
+            
+            if target_column is None:
+                self.log_message("WARNING", f"未找到 {date} {shift} 对应的数据列")
+                return 0.0
+            
+            # 找到Forecast行
+            line_column = df_with_shifts.columns[0]
+            for idx, row in df_with_shifts.iterrows():
+                line_value = row[line_column]
+                if pd.notna(line_value) and "forecast" in str(line_value).lower():
+                    forecast_value = row[target_column]
+                    if pd.notna(forecast_value) and forecast_value != 0:
+                        self.log_message("INFO", f"获取forecast值: {date} {shift} = {forecast_value}")
+                        return float(forecast_value)
+            
+            self.log_message("WARNING", f"未找到 {date} {shift} 的forecast数据")
+            return 0.0
+            
+        except Exception as e:
+            self.log_message("ERROR", f"获取forecast值时出错: {str(e)}")
+            return 0.0
+    
+    def calculate_shift_forecast(self, event_data: Dict[str, Any]) -> Dict[str, float]:
+        """
+        计算本班预测产量
+        
+        根据公式：F = E - C - D * (E/11)
+        其中：
+        - E: 本班出货计划（从Daily Plan的forecast获取）
+        - C: 已经损失的产量（用户输入）
+        - D: 剩余修理时间（用户输入，小时）
+        - F: 本班预测产量计算结果
+        
+        Args:
+            event_data: 事件数据字典
+            
+        Returns:
+            计算结果字典，包含所有相关数值
+        """
+        try:
+            # 获取事件数据
+            date = event_data.get("选择影响日期")
+            shift = event_data.get("选择影响班次")
+            lost_quantity = event_data.get("已经损失的产量", 0)
+            remaining_repair_time = event_data.get("剩余修理时间", 0)
+            
+            if not date or not shift:
+                return {
+                    "status": "error",
+                    "message": "缺少必要的日期或班次信息",
+                    "E": 0, "C": 0, "D": 0, "F": 0
+                }
+            
+            # 获取本班出货计划 E (forecast值)
+            E = self.get_forecast_value(date, shift)
+            
+            # 转换用户输入为数值
+            try:
+                C = float(lost_quantity) if lost_quantity else 0.0
+                D = float(remaining_repair_time) if remaining_repair_time else 0.0
+            except (ValueError, TypeError):
+                return {
+                    "status": "error", 
+                    "message": "用户输入的数值格式不正确",
+                    "E": E, "C": 0, "D": 0, "F": 0
+                }
+            
+            # 计算本班预测产量 F = E - C - D * (E/11)
+            if E > 0:
+                F = E - C - D * (E / 11)
+                
+                self.log_message("INFO", f"本班预测产量计算:")
+                self.log_message("INFO", f"  E (本班出货计划): {E}")
+                self.log_message("INFO", f"  C (已损失产量): {C}")
+                self.log_message("INFO", f"  D (剩余修理时间): {D}小时")
+                self.log_message("INFO", f"  F = {E} - {C} - {D} * ({E}/11) = {F:.2f}")
+                
+                return {
+                    "status": "success",
+                    "message": f"本班预测产量计算完成: {F:.2f}",
+                    "E": E,  # 本班出货计划
+                    "C": C,  # 已损失产量
+                    "D": D,  # 剩余修理时间
+                    "F": F,  # 本班预测产量
+                    "capacity_loss_per_hour": E / 11,  # 每小时产能损失
+                    "total_capacity_loss": D * (E / 11),  # 总产能损失
+                    "date": date,
+                    "shift": shift
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"未找到 {date} {shift} 的forecast数据或数据为0",
+                    "E": 0, "C": C, "D": D, "F": 0
+                }
+            
+        except Exception as e:
+            error_msg = f"计算本班预测产量时出错: {str(e)}"
+            self.log_message("ERROR", error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "E": 0, "C": 0, "D": 0, "F": 0
+            }

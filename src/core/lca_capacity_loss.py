@@ -42,15 +42,31 @@ class LCACapacityLossProcessor:
             处理结果字典
         """
         self.logger.info("=" * 60)
-        self.logger.info("🚀 开始处理LCA产能损失事件")
-        self.logger.info(f"📋 当前事件信息: 日期={event_data.get('选择影响日期')}, 班次={event_data.get('选择影响班次')}, 产线={event_data.get('选择产线')}")
+        self.logger.info("**开始处理LCA产能损失事件**")
+        self.logger.info(f"当前事件信息: 日期={event_data.get('选择影响日期')}, 班次={event_data.get('选择影响班次')}, 产线={event_data.get('选择产线')}")
         
         try:
+            # 步骤0：首先计算本班预测产量 I
+            self.logger.info("**步骤0: 计算本班预测产量 I...**")
+            forecast_calculation = self._calculate_shift_forecast_i(event_data)
+            
+            if forecast_calculation["status"] == "success":
+                self.logger.info("**本班预测产量计算成功:**")
+                self.logger.info(f"   E (本班出货计划): {forecast_calculation['E']}")
+                self.logger.info(f"   C (已损失产量): {forecast_calculation['C']}")
+                self.logger.info(f"   D (剩余修理时间): {forecast_calculation['D']}小时")
+                self.logger.info(f"   计算公式: F = E - C - D*(E/11)")
+                self.logger.info(f"   **F (本班预测产量 I): {forecast_calculation['F']:.2f}**")
+                self.logger.info(f"   每小时产能损失: {forecast_calculation['capacity_loss_per_hour']:.2f}")
+                self.logger.info(f"   总产能损失: {forecast_calculation['total_capacity_loss']:.2f}")
+            else:
+                self.logger.error(f"本班预测产量计算失败: {forecast_calculation['message']}")
+            
             # 步骤1：检查前3个班次都有报告损失，且累计损失超过10K
-            self.logger.info("🔍 步骤1: 开始检查前3个班次的损失情况...")
+            self.logger.info("**步骤1: 开始检查前3个班次的损失情况...**")
             check_result = self._check_previous_shifts_loss(event_data)
             
-            self.logger.info(f"📊 检查结果统计:")
+            self.logger.info(f"**检查结果统计:**")
             self.logger.info(f"   - 检查班次数: {check_result.get('shifts_checked', 0)}")
             self.logger.info(f"   - 有损失班次: {check_result.get('shifts_with_loss', 0)}")
             self.logger.info(f"   - 累计损失: {check_result.get('total_loss', 0):.0f}")
@@ -58,8 +74,8 @@ class LCACapacityLossProcessor:
             self.logger.info(f"   - 损失超过10K: {check_result.get('total_exceeds_10k', False)}")
             
             if check_result["has_sufficient_loss"]:
-                self.logger.info("✅ 判定结果: 前3个班次累计损失超过10K，建议加线")
-                self.logger.info("🏭 输出建议: 产线状况不佳，考虑加线")
+                self.logger.info("**判定结果: 前3个班次累计损失超过10K，建议加线**")
+                self.logger.info("**输出建议: 产线状况不佳，考虑加线**")
                 return {
                     "status": "add_line_required",
                     "message": "产线状况不佳，考虑加线",
@@ -69,11 +85,11 @@ class LCACapacityLossProcessor:
                     "event_data": event_data
                 }
             else:
-                self.logger.info("ℹ️  判定结果: 未达到加线条件，继续正常流程")
-                self.logger.info(f"📝 原因: {check_result.get('reason', '未知')}")
+                self.logger.info("**判定结果: 未达到加线条件，继续正常流程**")
+                self.logger.info(f"原因: {check_result.get('reason', '未知')}")
                 
                 # 这里是下一步逻辑的入口点
-                self.logger.info("⏸️  暂停：等待下一步业务逻辑的定义")
+                self.logger.info("暂停：等待下一步业务逻辑的定义")
                 
                 return {
                     "status": "normal_process",
@@ -86,7 +102,7 @@ class LCACapacityLossProcessor:
             
         except Exception as e:
             error_msg = f"处理LCA产能损失事件失败: {str(e)}"
-            self.logger.error(f"❌ {error_msg}")
+            self.logger.error(f"**{error_msg}**")
             return {
                 "status": "error",
                 "message": error_msg,
@@ -94,6 +110,192 @@ class LCACapacityLossProcessor:
             }
         finally:
             self.logger.info("=" * 60)
+    
+    def _calculate_shift_forecast_i(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        计算本班预测产量 I
+        
+        根据公式：F = E - C - D * (E/11)
+        其中：
+        - E: 本班出货计划（从Daily Plan的forecast获取）
+        - C: 已经损失的产量（用户输入）
+        - D: 剩余修理时间（用户输入，小时）
+        - F: 本班预测产量计算结果 (即 I 值)
+        
+        Args:
+            event_data: 事件数据字典
+            
+        Returns:
+            计算结果字典，包含所有相关数值
+        """
+        try:
+            # 获取事件数据
+            date = event_data.get("选择影响日期")
+            shift = event_data.get("选择影响班次")
+            lost_quantity = event_data.get("已经损失的产量", 0)
+            remaining_repair_time = event_data.get("剩余修理时间", 0)
+            
+            if not date or not shift:
+                return {
+                    "status": "error",
+                    "message": "缺少必要的日期或班次信息",
+                    "E": 0, "C": 0, "D": 0, "F": 0
+                }
+            
+            # 获取本班出货计划 E (forecast值)
+            line = event_data.get("选择产线", "")
+            E = self._get_forecast_value(date, shift, line)
+            
+            # 转换用户输入为数值
+            try:
+                C = float(lost_quantity) if lost_quantity else 0.0
+                D = float(remaining_repair_time) if remaining_repair_time else 0.0
+            except (ValueError, TypeError):
+                return {
+                    "status": "error", 
+                    "message": "用户输入的数值格式不正确",
+                    "E": E, "C": 0, "D": 0, "F": 0
+                }
+            
+            # 计算本班预测产量 F = E - C - D * (E/11)
+            if E > 0:
+                F = E - C - D * (E / 11)
+                
+                return {
+                    "status": "success",
+                    "message": f"本班预测产量 I 计算完成: {F:.2f}",
+                    "E": E,  # 本班出货计划
+                    "C": C,  # 已损失产量
+                    "D": D,  # 剩余修理时间
+                    "F": F,  # 本班预测产量 (I值)
+                    "capacity_loss_per_hour": E / 11,  # 每小时产能损失
+                    "total_capacity_loss": D * (E / 11),  # 总产能损失
+                    "date": date,
+                    "shift": shift
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"未找到 {date} {shift} 的forecast数据或数据为0",
+                    "E": 0, "C": C, "D": D, "F": 0
+                }
+            
+        except Exception as e:
+            error_msg = f"计算本班预测产量 I 时出错: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "E": 0, "C": 0, "D": 0, "F": 0
+            }
+    
+    def _get_forecast_value(self, date: str, shift: str, target_line: str = "") -> float:
+        """
+        从Daily Plan获取指定日期班次的forecast值（本班出货计划 E）
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式)
+            shift: 班次字符串 (T1, T2, T3, T4)
+            target_line: 目标产线名称 (如 F17)，用于找到正确的forecast值
+            
+        Returns:
+            forecast值，如果未找到返回0.0
+        """
+        try:
+            # 直接读取Excel文件以获取三级表头信息
+            file_path = "data/daily plan.xlsx"
+            df_with_shifts = pd.read_excel(file_path, sheet_name=0, header=[0,1,2])
+            
+            # 找到目标日期和班次对应的列
+            target_column = None
+            target_col_idx = None
+            for i, col in enumerate(df_with_shifts.columns):
+                if isinstance(col, tuple) and len(col) >= 3:
+                    date_obj = col[0]
+                    col_shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = None
+                    if hasattr(date_obj, 'strftime'):
+                        formatted_date = date_obj.strftime('%Y-%m-%d')
+                    elif isinstance(date_obj, str) and '-' in date_obj:
+                        try:
+                            day, month = date_obj.split('-')
+                            month_map = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            }
+                            if month in month_map:
+                                formatted_date = f"2025-{month_map[month]}-{day.zfill(2)}"
+                        except:
+                            continue
+                    
+                    # 找到匹配的日期和班次列
+                    if formatted_date == date and col_shift == shift:
+                        target_column = col
+                        target_col_idx = i
+                        break
+            
+            if target_column is None:
+                self.logger.warning(f"未找到 {date} {shift} 对应的数据列")
+                return 0.0
+            
+            # 找到Forecast行 - 修复逻辑：找到与目标产线相关的forecast
+            line_column = df_with_shifts.columns[0]
+            
+            # 如果提供了目标产线，优先查找与该产线相关的forecast
+            if target_line:
+                # 步骤1：找到目标产线行
+                target_line_row = None
+                for idx, row in df_with_shifts.iterrows():
+                    line_value = row[line_column]
+                    if pd.notna(line_value) and target_line in str(line_value):
+                        target_line_row = idx
+                        self.logger.info(f"找到目标产线 {target_line} 在行 {idx}")
+                        break
+                
+                if target_line_row is not None:
+                    # 步骤2：找到最近的forecast行（在目标产线之前）
+                    forecast_rows = []
+                    for idx, row in df_with_shifts.iterrows():
+                        line_value = row[line_column]
+                        if pd.notna(line_value) and "forecast" in str(line_value).lower():
+                            forecast_value = row[target_column]
+                            if pd.notna(forecast_value) and forecast_value != 0:
+                                forecast_rows.append((idx, forecast_value))
+                    
+                    # 找到最近的forecast行（在目标产线之前）
+                    closest_forecast_value = None
+                    min_distance = float('inf')
+                    
+                    for forecast_idx, forecast_value in forecast_rows:
+                        if forecast_idx < target_line_row:
+                            distance = target_line_row - forecast_idx
+                            if distance < min_distance:
+                                min_distance = distance
+                                closest_forecast_value = forecast_value
+                    
+                    if closest_forecast_value is not None:
+                        self.logger.info(f"找到 {target_line} 的forecast值: {closest_forecast_value}")
+                        return float(closest_forecast_value)
+            
+            # 如果没有指定产线或没有找到相关forecast，使用原始逻辑（找第一个非零forecast）
+            for idx, row in df_with_shifts.iterrows():
+                line_value = row[line_column]
+                if pd.notna(line_value) and "forecast" in str(line_value).lower():
+                    forecast_value = row[target_column]
+                    if pd.notna(forecast_value) and forecast_value != 0:
+                        if target_line:
+                            self.logger.warning(f"未找到 {target_line} 的专用forecast，使用第一个非零forecast: {forecast_value}")
+                        return float(forecast_value)
+            
+            self.logger.warning(f"未找到 {date} {shift} 的forecast数据")
+            return 0.0
+            
+        except Exception as e:
+            self.logger.error(f"获取forecast值时出错: {str(e)}")
+            return 0.0
     
     def _check_previous_shifts_loss(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -133,12 +335,12 @@ class LCACapacityLossProcessor:
             
             # 获取前3个班次的信息
             previous_shifts = self._get_previous_3_shifts(current_date, current_shift)
-            self.logger.info(f"📅 计算得出前3个班次:")
+            self.logger.info(f"**计算得出前3个班次:**")
             for i, shift in enumerate(previous_shifts, 1):
                 self.logger.info(f"   {i}. {shift['date']} {shift['shift']}")
             
             # 检查每个班次是否有损失报告
-            self.logger.info(f"🔍 开始查询各班次的损失数据...")
+            self.logger.info(f"**开始查询各班次的损失数据...**")
             shifts_with_loss = []
             total_loss = 0
             
@@ -149,9 +351,9 @@ class LCACapacityLossProcessor:
                 if loss_data["has_loss"]:
                     shifts_with_loss.append(loss_data)
                     total_loss += loss_data["loss_amount"]
-                    self.logger.info(f"   ✅ 找到损失记录: {loss_data['loss_amount']:.0f}")
+                    self.logger.info(f"   找到损失记录: {loss_data['loss_amount']:.0f}")
                 else:
-                    self.logger.info(f"   ❌ 无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
+                    self.logger.info(f"   无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
             
             # 判断是否满足条件：前3个班次都有损失报告 且 累计损失超过10K
             all_shifts_have_loss = len(shifts_with_loss) >= 3

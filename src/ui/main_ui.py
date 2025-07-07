@@ -91,9 +91,13 @@ class ProductionSchedulingSystem:
         log_frame = ttk.LabelFrame(main_frame, text="系统日志")
         log_frame.pack(fill=tk.BOTH, expand=False, pady=10)
         
-        # System log text area
-        self.log_text = tk.Text(log_frame, height=6, bg="#f0f0f0", state=tk.DISABLED)
+        # System log text area (调大高度以便查看更多日志)
+        self.log_text = tk.Text(log_frame, height=20, bg="#f0f0f0", state=tk.DISABLED)
         self.log_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Configure text tags for formatting
+        self.log_text.tag_configure("bold", font=("Consolas", 9, "bold"))
+        self.log_text.tag_configure("normal", font=("Consolas", 9, "normal"))
         
     def setup_control_panel(self):
         """
@@ -690,11 +694,24 @@ class ProductionSchedulingSystem:
         # Get current time
         timestamp = datetime.datetime.now().strftime('%H:%M:%S')
         
-        # Format the log message
-        log_entry = f"[{timestamp}] {level}: {message}\n"
-        
-        # Apply tag based on level for color
-        self.log_text.insert(tk.END, log_entry)
+        # Check if message contains bold formatting
+        if "**" in message:
+            # Parse bold text
+            parts = message.split("**")
+            log_prefix = f"[{timestamp}] {level}: "
+            self.log_text.insert(tk.END, log_prefix, "normal")
+            
+            for i, part in enumerate(parts):
+                if i % 2 == 1:  # Odd indices are bold
+                    self.log_text.insert(tk.END, part, "bold")
+                else:  # Even indices are normal
+                    self.log_text.insert(tk.END, part, "normal")
+            
+            self.log_text.insert(tk.END, "\n", "normal")
+        else:
+            # Normal message without formatting
+            log_entry = f"[{timestamp}] {level}: {message}\n"
+            self.log_text.insert(tk.END, log_entry, "normal")
         
         # Scroll to the end
         self.log_text.see(tk.END)
