@@ -89,6 +89,28 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # 创建DOS范围配置表
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS dos_range_config (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        config_name TEXT UNIQUE NOT NULL,
+                        min_dos_threshold REAL NOT NULL DEFAULT 0.5,
+                        max_dos_threshold REAL,
+                        description TEXT,
+                        is_active INTEGER DEFAULT 1,
+                        created_time TEXT NOT NULL,
+                        updated_time TEXT NOT NULL
+                    )
+                ''')
+                
+                # 插入默认配置（如果不存在）
+                cursor.execute('''
+                    INSERT OR IGNORE INTO dos_range_config 
+                    (config_name, min_dos_threshold, description, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', ('default', 0.5, 'Default minimum DOS threshold for LCA processing', 
+                      datetime.now().isoformat(), datetime.now().isoformat()))
+                
                 conn.commit()
                 self.logger.info("数据库初始化完成")
                 
@@ -440,3 +462,181 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"获取统计信息失败: {str(e)}")
             return {}
+    
+    def get_dos_threshold(self, config_name: str = "default") -> float:
+        """
+        获取DOS阈值配置
+        
+        Args:
+            config_name: 配置名称，默认为'default'
+            
+        Returns:
+            DOS最小阈值，默认0.5
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT min_dos_threshold FROM dos_range_config 
+                    WHERE config_name = ? AND is_active = 1
+                ''', (config_name,))
+                
+                result = cursor.fetchone()
+                if result:
+                    return float(result[0])
+                else:
+                    # 如果未找到配置，返回默认值0.5并创建默认配置
+                    self._ensure_default_dos_config()
+                    return 0.5
+                    
+        except Exception as e:
+            self.logger.error(f"获取DOS阈值配置失败: {str(e)}")
+            return 0.5
+    
+    def set_dos_threshold(self, min_threshold: float, config_name: str = "default", 
+                         max_threshold: Optional[float] = None, description: str = "") -> bool:
+        """
+        设置DOS阈值配置
+        
+        Args:
+            min_threshold: 最小DOS阈值
+            config_name: 配置名称
+            max_threshold: 最大DOS阈值（可选）
+            description: 配置描述
+            
+        Returns:
+            是否设置成功
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 检查配置是否存在
+                cursor.execute('SELECT id FROM dos_range_config WHERE config_name = ?', (config_name,))
+                existing = cursor.fetchone()
+                
+                current_time = datetime.now().isoformat()
+                
+                if existing:
+                    # 更新现有配置
+                    cursor.execute('''
+                        UPDATE dos_range_config 
+                        SET min_dos_threshold = ?, max_dos_threshold = ?, 
+                            description = ?, updated_time = ?
+                        WHERE config_name = ?
+                    ''', (min_threshold, max_threshold, description, current_time, config_name))
+                else:
+                    # 创建新配置
+                    cursor.execute('''
+                        INSERT INTO dos_range_config 
+                        (config_name, min_dos_threshold, max_dos_threshold, 
+                         description, created_time, updated_time)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (config_name, min_threshold, max_threshold, description, 
+                          current_time, current_time))
+                
+                conn.commit()
+                self.logger.info(f"DOS阈值配置已更新: {config_name} = {min_threshold}")
+                return True
+                
+        except Exception as e:
+            error_msg = f"设置DOS阈值配置失败: {str(e)}"
+            if self.logger:
+                self.logger.error(error_msg)
+            else:
+                print(f"Database Manager Error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_all_dos_configs(self) -> List[Dict[str, Any]]:
+        """
+        获取所有DOS配置
+        
+        Returns:
+            配置列表
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT config_name, min_dos_threshold, max_dos_threshold, 
+                           description, is_active, created_time, updated_time
+                    FROM dos_range_config
+                    ORDER BY created_time
+                ''')
+                
+                configs = []
+                for row in cursor.fetchall():
+                    configs.append({
+                        "config_name": row[0],
+                        "min_dos_threshold": row[1],
+                        "max_dos_threshold": row[2],
+                        "description": row[3],
+                        "is_active": bool(row[4]),
+                        "created_time": row[5],
+                        "updated_time": row[6]
+                    })
+                
+                return configs
+                
+        except Exception as e:
+            self.logger.error(f"获取DOS配置列表失败: {str(e)}")
+            return []
+    
+    def _ensure_default_dos_config(self):
+        """确保默认DOS配置存在"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO dos_range_config 
+                    (config_name, min_dos_threshold, description, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', ('default', 0.5, 'Default minimum DOS threshold for LCA processing', 
+                      datetime.now().isoformat(), datetime.now().isoformat()))
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"创建默认DOS配置失败: {str(e)}")
+    
+    def check_dos_threshold(self, dos_value: float, config_name: str = "default") -> Dict[str, Any]:
+        """
+        检查DOS值是否符合阈值要求
+        
+        Args:
+            dos_value: 计算得到的DOS值
+            config_name: 配置名称
+            
+        Returns:
+            检查结果字典
+        """
+        try:
+            threshold = self.get_dos_threshold(config_name)
+            
+            result = {
+                "dos_value": dos_value,
+                "threshold": threshold,
+                "meets_threshold": dos_value >= threshold,
+                "config_name": config_name,
+                "difference": dos_value - threshold,
+                "message": ""
+            }
+            
+            if result["meets_threshold"]:
+                result["message"] = f"DOS值 {dos_value:.2f} 天符合最低阈值 {threshold:.2f} 天要求"
+                result["status"] = "pass"
+            else:
+                result["message"] = f"DOS值 {dos_value:.2f} 天低于最低阈值 {threshold:.2f} 天，差距 {abs(result['difference']):.2f} 天"
+                result["status"] = "fail"
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"检查DOS阈值失败: {str(e)}")
+            return {
+                "dos_value": dos_value,
+                "threshold": 0.5,
+                "meets_threshold": False,
+                "status": "error",
+                "message": f"检查过程出错: {str(e)}"
+            }

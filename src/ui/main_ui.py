@@ -183,9 +183,18 @@ class ProductionSchedulingSystem:
         )
         clear_log_btn.pack(pady=5, anchor=tk.W)
         
+        dos_config_btn = ttk.Button(
+            left_panel, 
+            text="DOS配置", 
+            command=self.open_dos_config,
+            **button_style
+        )
+        dos_config_btn.pack(pady=5, anchor=tk.W)
+        
         settings_btn = ttk.Button(
             left_panel, 
-            text="系统设置", 
+            text="系统设置/DOS配置", 
+            command=self.open_dos_config,
             **button_style
         )
         settings_btn.pack(pady=5, anchor=tk.W)
@@ -751,6 +760,495 @@ class ProductionSchedulingSystem:
             self.event_form_ui.export_events()
         else:
             messagebox.showwarning("导出失败", "事件管理功能尚未初始化")
+    
+    def open_dos_config(self):
+        """
+        Open DOS configuration dialog.
+        """
+        try:
+            # 直接使用简单的输入对话框
+            current_threshold = self.event_manager.db_manager.get_dos_threshold()
+            
+            # 创建简单对话框
+            dialog = tk.Toplevel(self.root)
+            dialog.title("DOS阈值配置")
+            dialog.geometry("350x200")
+            dialog.transient(self.root)
+            dialog.grab_set()
+            
+            # 居中显示
+            dialog.update_idletasks()
+            x = (dialog.winfo_screenwidth() // 2) - (350 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (200 // 2)
+            dialog.geometry(f"350x200+{x}+{y}")
+            
+            # 主框架
+            main_frame = ttk.Frame(dialog)
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+            
+            # 标题
+            ttk.Label(main_frame, text="DOS阈值配置", font=("Arial", 14, "bold")).pack(pady=(0, 15))
+            
+            # 当前值显示
+            ttk.Label(main_frame, text=f"当前阈值: {current_threshold:.1f} 天").pack(pady=(0, 10))
+            
+            # 输入框
+            input_frame = ttk.Frame(main_frame)
+            input_frame.pack(pady=(0, 20))
+            
+            ttk.Label(input_frame, text="新阈值:").pack(side=tk.LEFT)
+            threshold_var = tk.StringVar(value=f"{current_threshold:.1f}")
+            threshold_entry = ttk.Entry(input_frame, textvariable=threshold_var, width=8)
+            threshold_entry.pack(side=tk.LEFT, padx=(5, 5))
+            ttk.Label(input_frame, text="天").pack(side=tk.LEFT)
+            
+            # 按钮框架
+            button_frame = ttk.Frame(main_frame)
+            button_frame.pack(fill=tk.X)
+            
+            def save_and_close():
+                try:
+                    new_threshold = float(threshold_var.get())
+                    if 0.1 <= new_threshold <= 5.0:
+                        success = self.event_manager.db_manager.set_dos_threshold(
+                            new_threshold, 
+                            description="GUI直接设置"
+                        )
+                        if success:
+                            messagebox.showinfo("成功", f"DOS阈值已设置为 {new_threshold:.1f} 天")
+                            self.log_message("INFO", f"DOS阈值已更新为 {new_threshold:.1f} 天")
+                            dialog.destroy()
+                        else:
+                            messagebox.showerror("错误", "保存失败")
+                    else:
+                        messagebox.showerror("错误", "阈值必须在0.1到5.0之间")
+                except ValueError:
+                    messagebox.showerror("错误", "请输入有效数字")
+            
+            def reset_and_close():
+                if messagebox.askyesno("确认", "重置为默认0.5天？"):
+                    self.event_manager.db_manager.set_dos_threshold(0.5)
+                    messagebox.showinfo("成功", "已重置为默认配置")
+                    self.log_message("INFO", "DOS阈值已重置为默认值")
+                    dialog.destroy()
+            
+            # 按钮
+            ttk.Button(button_frame, text="确认保存", command=save_and_close).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="重置默认", command=reset_and_close).pack(side=tk.LEFT, padx=(0, 10))
+            ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT)
+            
+            # 焦点到输入框
+            threshold_entry.focus()
+            threshold_entry.select_range(0, tk.END)
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"打开DOS配置失败: {str(e)}")
+            self.log_message("ERROR", f"打开DOS配置失败: {str(e)}")
+
+
+class SimpleDOSConfigDialog:
+    """
+    简化的DOS配置对话框
+    """
+    
+    def __init__(self, parent, db_manager, log_callback):
+        """
+        初始化DOS配置对话框
+        
+        Args:
+            parent: 父窗口
+            db_manager: 数据库管理器
+            log_callback: 日志回调函数
+        """
+        self.parent = parent
+        self.db_manager = db_manager
+        self.log_callback = log_callback
+        
+        # 创建对话框窗口
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("DOS阈值配置")
+        self.dialog.geometry("450x300")
+        self.dialog.resizable(True, True)
+        
+        # 使对话框模态
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # 居中显示
+        self.dialog.update_idletasks()
+        x = (self.dialog.winfo_screenwidth() // 2) - (450 // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (300 // 2)
+        self.dialog.geometry(f"450x300+{x}+{y}")
+        
+        self.setup_ui()
+        self.load_current_config()
+        
+    def setup_ui(self):
+        """设置对话框界面"""
+        # 主框架
+        main_frame = ttk.Frame(self.dialog)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # 标题
+        title_label = ttk.Label(main_frame, text="DOS阈值配置", font=("Arial", 16, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # 当前配置显示
+        current_frame = ttk.LabelFrame(main_frame, text="当前配置")
+        current_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        self.current_label = ttk.Label(current_frame, text="加载中...", font=("Arial", 12))
+        self.current_label.pack(padx=15, pady=15)
+        
+        # 阈值设置
+        config_frame = ttk.LabelFrame(main_frame, text="设置新阈值")
+        config_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        threshold_frame = ttk.Frame(config_frame)
+        threshold_frame.pack(padx=15, pady=15)
+        
+        ttk.Label(threshold_frame, text="最小DOS阈值:", font=("Arial", 11)).pack(side=tk.LEFT)
+        
+        self.threshold_var = tk.StringVar()
+        threshold_spinbox = ttk.Spinbox(
+            threshold_frame, 
+            from_=0.1, 
+            to=5.0, 
+            increment=0.1, 
+            textvariable=self.threshold_var,
+            width=10,
+            format="%.1f",
+            font=("Arial", 11)
+        )
+        threshold_spinbox.pack(side=tk.LEFT, padx=(10, 5))
+        
+        ttk.Label(threshold_frame, text="天", font=("Arial", 11)).pack(side=tk.LEFT)
+        
+        # 说明文本
+        desc_text = "当计算DOS值低于此阈值时，系统会发出警告提示"
+        desc_label = ttk.Label(config_frame, text=desc_text, font=("Arial", 9), foreground="gray")
+        desc_label.pack(padx=15, pady=(0, 10))
+        
+        # 按钮框架 - 固定在底部
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(30, 0))
+        
+        # 分隔线
+        separator = ttk.Separator(button_frame, orient='horizontal')
+        separator.pack(fill=tk.X, pady=(0, 15))
+        
+        # 按钮容器
+        btn_container = ttk.Frame(button_frame)
+        btn_container.pack()
+        
+        # 确认按钮 - 大号，醒目
+        confirm_btn = ttk.Button(btn_container, text="✓ 确认保存", command=self.save_config)
+        confirm_btn.pack(side=tk.LEFT, padx=(0, 15))
+        confirm_btn.configure(width=12)
+        
+        # 重置按钮
+        reset_btn = ttk.Button(btn_container, text="🔄 重置", command=self.reset_config)
+        reset_btn.pack(side=tk.LEFT, padx=(0, 15))
+        reset_btn.configure(width=10)
+        
+        # 取消按钮
+        cancel_btn = ttk.Button(btn_container, text="✗ 取消", command=self.dialog.destroy)
+        cancel_btn.pack(side=tk.LEFT)
+        cancel_btn.configure(width=10)
+        
+        # 绑定回车键到确认按钮
+        self.dialog.bind('<Return>', lambda e: self.save_config())
+        
+    def load_current_config(self):
+        """加载当前配置"""
+        try:
+            current_threshold = self.db_manager.get_dos_threshold()
+            self.current_label.config(text=f"当前DOS阈值: {current_threshold:.1f} 天")
+            self.threshold_var.set(f"{current_threshold:.1f}")
+        except Exception as e:
+            self.current_label.config(text=f"加载配置失败: {e}")
+            
+    def save_config(self):
+        """保存配置"""
+        try:
+            threshold_str = self.threshold_var.get().strip()
+            if not threshold_str:
+                messagebox.showerror("错误", "请输入阈值")
+                return
+                
+            new_threshold = float(threshold_str)
+            
+            if new_threshold < 0.1 or new_threshold > 5.0:
+                messagebox.showerror("错误", "阈值必须在0.1到5.0之间")
+                return
+            
+            success = self.db_manager.set_dos_threshold(
+                new_threshold, 
+                description=f"GUI配置更新于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            
+            if success:
+                messagebox.showinfo("成功", f"DOS阈值已设置为 {new_threshold:.1f} 天")
+                self.log_callback("INFO", f"DOS阈值已更新为 {new_threshold:.1f} 天")
+                self.load_current_config()
+            else:
+                messagebox.showerror("错误", "保存配置失败")
+                
+        except ValueError:
+            messagebox.showerror("错误", "请输入有效的数字")
+        except Exception as e:
+            messagebox.showerror("错误", f"保存失败: {e}")
+            
+    def reset_config(self):
+        """重置配置"""
+        if messagebox.askyesno("确认", "重置为默认配置0.5天？"):
+            success = self.db_manager.set_dos_threshold(0.5, description="重置为默认")
+            if success:
+                messagebox.showinfo("成功", "已重置为默认配置")
+                self.log_callback("INFO", "DOS阈值已重置为默认值 0.5 天")
+                self.load_current_config()
+            else:
+                messagebox.showerror("错误", "重置失败")
+
+
+class DOSConfigDialogOld:
+    """
+    DOS配置对话框
+    """
+    
+    def __init__(self, parent, db_manager, log_callback):
+        """
+        初始化DOS配置对话框
+        
+        Args:
+            parent: 父窗口
+            db_manager: 数据库管理器
+            log_callback: 日志回调函数
+        """
+        self.parent = parent
+        self.db_manager = db_manager
+        self.log_callback = log_callback
+        
+        # 创建对话框窗口
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("DOS阈值配置")
+        self.dialog.geometry("600x500")
+        self.dialog.resizable(True, True)
+        
+        # 使对话框模态
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        
+        # 居中显示
+        self.dialog.update_idletasks()
+        x = (self.dialog.winfo_screenwidth() // 2) - (600 // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (500 // 2)
+        self.dialog.geometry(f"600x500+{x}+{y}")
+        
+        self.setup_ui()
+        self.load_current_config()
+        
+    def setup_ui(self):
+        """设置对话框界面"""
+        # 创建主画布和滚动条
+        canvas = tk.Canvas(self.dialog)
+        scrollbar = ttk.Scrollbar(self.dialog, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # 主框架
+        main_frame = ttk.Frame(scrollable_frame)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        
+        # 标题
+        title_label = ttk.Label(main_frame, text="DOS阈值配置", font=("Arial", 14, "bold"))
+        title_label.pack(pady=(0, 20))
+        
+        # 配置框架
+        config_frame = ttk.LabelFrame(main_frame, text="当前配置")
+        config_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        # 最小阈值设置
+        threshold_frame = ttk.Frame(config_frame)
+        threshold_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(threshold_frame, text="最小DOS阈值:").pack(side=tk.LEFT)
+        
+        self.threshold_var = tk.StringVar()
+        self.threshold_spinbox = ttk.Spinbox(
+            threshold_frame, 
+            from_=0.1, 
+            to=5.0, 
+            increment=0.1, 
+            textvariable=self.threshold_var,
+            width=10,
+            format="%.1f"
+        )
+        self.threshold_spinbox.pack(side=tk.LEFT, padx=(10, 5))
+        
+        ttk.Label(threshold_frame, text="天").pack(side=tk.LEFT)
+        
+        # 说明文本
+        desc_frame = ttk.Frame(config_frame)
+        desc_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+        
+        desc_text = """说明：
+• 当计算得到的DOS值低于此阈值时，系统会发出警告
+• 默认最小阈值为0.5天
+• 建议根据实际生产情况调整此值"""
+        
+        desc_label = ttk.Label(desc_frame, text=desc_text, justify=tk.LEFT)
+        desc_label.pack(anchor=tk.W)
+        
+        # 当前配置显示
+        current_frame = ttk.LabelFrame(main_frame, text="当前系统配置")
+        current_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.current_config_text = tk.Text(current_frame, height=6, state=tk.DISABLED, wrap=tk.WORD)
+        self.current_config_text.pack(fill=tk.X, padx=10, pady=10)
+        
+        # 按钮框架 - 使用分隔线突出显示
+        separator = ttk.Separator(main_frame, orient='horizontal')
+        separator.pack(fill=tk.X, pady=(15, 15))
+        
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 20))
+        
+        # 确认/保存按钮 - 加大尺寸，使用醒目颜色
+        confirm_btn = ttk.Button(button_frame, text="✓ 确认保存", command=self.save_config)
+        confirm_btn.pack(side=tk.LEFT, padx=(0, 15))
+        confirm_btn.configure(width=15)
+        
+        # 重置按钮
+        reset_btn = ttk.Button(button_frame, text="🔄 重置默认", command=self.reset_config)
+        reset_btn.pack(side=tk.LEFT, padx=(0, 15))
+        reset_btn.configure(width=15)
+        
+        # 取消按钮
+        cancel_btn = ttk.Button(button_frame, text="✗ 取消", command=self.dialog.destroy)
+        cancel_btn.pack(side=tk.RIGHT)
+        cancel_btn.configure(width=10)
+        
+    def load_current_config(self):
+        """加载当前配置"""
+        try:
+            # 获取当前阈值
+            current_threshold = self.db_manager.get_dos_threshold()
+            self.threshold_var.set(f"{current_threshold:.1f}")
+            
+            # 获取所有配置
+            configs = self.db_manager.get_all_dos_configs()
+            
+            # 显示配置信息
+            self.current_config_text.config(state=tk.NORMAL)
+            self.current_config_text.delete(1.0, tk.END)
+            
+            config_info = f"当前活动配置:\n"
+            config_info += f"• 最小DOS阈值: {current_threshold:.1f} 天\n\n"
+            config_info += f"所有配置记录:\n"
+            
+            for config in configs:
+                status = "✓ 激活" if config['is_active'] else "  停用"
+                config_info += f"{status} {config['config_name']}: {config['min_dos_threshold']:.1f} 天\n"
+                config_info += f"   创建时间: {config['created_time'][:19]}\n"
+                if config['description']:
+                    config_info += f"   说明: {config['description']}\n"
+                config_info += "\n"
+            
+            self.current_config_text.insert(tk.END, config_info)
+            self.current_config_text.config(state=tk.DISABLED)
+            
+        except Exception as e:
+            messagebox.showerror("错误", f"加载配置失败: {str(e)}")
+            
+    def save_config(self):
+        """保存配置"""
+        try:
+            # 获取新的阈值
+            threshold_str = self.threshold_var.get().strip()
+            print(f"Debug: 获取到的阈值字符串: '{threshold_str}'")  # 调试信息
+            
+            if not threshold_str:
+                messagebox.showerror("错误", "请输入阈值")
+                return
+                
+            new_threshold = float(threshold_str)
+            print(f"Debug: 转换后的阈值: {new_threshold}")  # 调试信息
+            
+            # 验证阈值范围
+            if new_threshold < 0.1 or new_threshold > 5.0:
+                messagebox.showerror("错误", "阈值必须在0.1到5.0之间")
+                return
+            
+            print(f"Debug: 准备保存到数据库: {new_threshold}")  # 调试信息
+            
+            # 保存到数据库
+            try:
+                success = self.db_manager.set_dos_threshold(
+                    new_threshold, 
+                    description=f"用户配置于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                
+                print(f"Debug: 数据库保存结果: {success}")  # 调试信息
+                
+                if success:
+                    messagebox.showinfo("成功", f"DOS阈值已设置为 {new_threshold:.1f} 天")
+                    self.log_callback("INFO", f"DOS阈值已更新为 {new_threshold:.1f} 天")
+                    self.load_current_config()
+                else:
+                    messagebox.showerror("错误", "保存配置失败，请检查数据库连接")
+                    
+            except Exception as db_error:
+                messagebox.showerror("错误", f"数据库操作失败: {str(db_error)}")
+                print(f"Database error: {db_error}")  # 调试信息
+                import traceback
+                traceback.print_exc()
+                
+        except ValueError as ve:
+            messagebox.showerror("错误", f"请输入有效的数字: {str(ve)}")
+            print(f"ValueError: {ve}")  # 调试信息
+        except Exception as e:
+            messagebox.showerror("错误", f"保存配置失败: {str(e)}")
+            print(f"Save config error: {e}")  # 调试信息
+            import traceback
+            traceback.print_exc()
+            
+    def reset_config(self):
+        """重置为默认配置"""
+        try:
+            # 确认重置
+            if messagebox.askyesno("确认", "确定要重置为默认配置(0.5天)吗？"):
+                try:
+                    success = self.db_manager.set_dos_threshold(
+                        0.5, 
+                        description=f"重置为默认配置于 {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
+                    
+                    if success:
+                        self.threshold_var.set("0.5")
+                        messagebox.showinfo("成功", "已重置为默认配置")
+                        self.log_callback("INFO", "DOS阈值已重置为默认值 0.5 天")
+                        self.load_current_config()
+                    else:
+                        messagebox.showerror("错误", "重置失败，请检查数据库连接")
+                        
+                except Exception as db_error:
+                    messagebox.showerror("错误", f"数据库操作失败: {str(db_error)}")
+                    print(f"Database reset error: {db_error}")  # 调试信息
+                    
+        except Exception as e:
+            messagebox.showerror("错误", f"重置配置失败: {str(e)}")
+            print(f"Reset config error: {e}")  # 调试信息
 
 
 if __name__ == "__main__":

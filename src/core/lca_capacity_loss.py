@@ -32,6 +32,10 @@ class LCACapacityLossProcessor:
         self.data_loader = data_loader
         self.logger = logger or logging.getLogger(__name__)
         
+        # 初始化数据库管理器用于DOS阈值检查
+        from .database_manager import DatabaseManager
+        self.db_manager = DatabaseManager("data/events.db", self.logger)
+        
     def process_lca_capacity_loss(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         处理LCA产能损失事件的主要入口函数
@@ -110,14 +114,41 @@ class LCACapacityLossProcessor:
                         "event_data": event_data
                     }
                 
+                # 步骤3：DOS阈值检查
+                dos_threshold_check = None
+                dos_acceptance_decision = None
+                
+                if dos_calculation.get("status") == "success":
+                    dos_value = dos_calculation.get("dos_value", 0.0)
+                    dos_threshold_check = self._check_dos_threshold(dos_value)
+                    
+                    self.logger.info("🎯 **步骤3: DOS阈值检查结果**")
+                    self.logger.info(f"   📊 计算DOS值: {dos_value:.2f} 天")
+                    self.logger.info(f"   🎚️ 最低阈值: {dos_threshold_check['threshold']:.2f} 天")
+                    self.logger.info(f"   ✅ 是否符合要求: {'是' if dos_threshold_check['meets_threshold'] else '否'}")
+                    self.logger.info(f"   📝 {dos_threshold_check['message']}")
+                    
+                    if not dos_threshold_check['meets_threshold']:
+                        self.logger.warning("⚠️ **DOS值低于最低阈值要求！**")
+                    
+                    # 步骤4：DOS损失接受性决策
+                    dos_acceptance_decision = self._make_dos_acceptance_decision(
+                        dos_value, 
+                        dos_threshold_check, 
+                        event_data
+                    )
+                
                 return {
                     "status": "normal_process",
                     "message": "损失在正常范围内，已计算DOS",
-                    "step": "检查前3班次损失 + DOS计算",
+                    "step": "检查前3班次损失 + DOS计算 + DOS阈值检查 + DOS损失接受性决策",
                     "check_result": check_result,
                     "dos_calculation": dos_calculation,
+                    "dos_threshold_check": dos_threshold_check,
+                    "dos_acceptance_decision": dos_acceptance_decision,
                     "forecast_calculation": forecast_calculation,
-                    "recommendation": "标准处理",
+                    "recommendation": self._get_final_recommendation(check_result, dos_calculation, dos_threshold_check),
+                    "final_output": dos_acceptance_decision.get("output_message", "") if dos_acceptance_decision else "",
                     "event_data": event_data
                 }
             
@@ -1022,3 +1053,182 @@ class LCACapacityLossProcessor:
                 "message": error_msg,
                 "dos_value": 0.0
             }
+    
+    def _check_dos_threshold(self, dos_value: float) -> Dict[str, Any]:
+        """
+        检查DOS值是否符合阈值要求
+        
+        Args:
+            dos_value: 计算得到的DOS值
+            
+        Returns:
+            检查结果字典
+        """
+        try:
+            return self.db_manager.check_dos_threshold(dos_value)
+        except Exception as e:
+            self.logger.error(f"DOS阈值检查失败: {str(e)}")
+            return {
+                "dos_value": dos_value,
+                "threshold": 0.5,
+                "meets_threshold": dos_value >= 0.5,
+                "status": "error",
+                "message": f"检查过程出错，使用默认阈值0.5: {str(e)}"
+            }
+    
+    def _get_final_recommendation(self, check_result: Dict[str, Any], 
+                                 dos_calculation: Dict[str, Any], 
+                                 dos_threshold_check: Optional[Dict[str, Any]]) -> str:
+        """
+        根据所有检查结果生成最终建议
+        
+        Args:
+            check_result: 前3班次损失检查结果
+            dos_calculation: DOS计算结果
+            dos_threshold_check: DOS阈值检查结果
+            
+        Returns:
+            最终建议字符串
+        """
+        try:
+            # 如果前3班次累计损失超过10K，建议加线
+            if check_result.get("has_sufficient_loss", False):
+                return "加线处理"
+            
+            # 如果DOS计算失败或需要跳出事件
+            if dos_calculation.get("status") != "success":
+                return "跳出事件"
+            
+            # 如果DOS阈值检查失败
+            if not dos_threshold_check or dos_threshold_check.get("status") == "error":
+                return "标准处理（阈值检查失败）"
+            
+            # 根据DOS阈值检查结果给出建议
+            if dos_threshold_check.get("meets_threshold", False):
+                return "标准处理（DOS值符合要求）"
+            else:
+                dos_value = dos_threshold_check.get("dos_value", 0.0)
+                threshold = dos_threshold_check.get("threshold", 0.5)
+                return f"谨慎处理（DOS值{dos_value:.2f}低于阈值{threshold:.2f}）"
+                
+        except Exception as e:
+            self.logger.error(f"生成最终建议失败: {str(e)}")
+            return "标准处理（建议生成失败）"
+    
+    def _make_dos_acceptance_decision(self, dos_value: float, 
+                                    dos_threshold_check: Dict[str, Any], 
+                                    event_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        根据DOS阈值检查结果做出DOS损失接受性决策
+        
+        根据流程图逻辑：
+        - 如果预计损失后DOS > 最低控制DOS：可以接受损失，输出"损失已用DOS覆盖，未进行产量调整"
+        - 如果预计损失后DOS ≤ 最低控制DOS：不可接受损失，输出"新DOS预计降为XXXX"
+        
+        Args:
+            dos_value: 计算得到的DOS值
+            dos_threshold_check: DOS阈值检查结果
+            event_data: 事件数据
+            
+        Returns:
+            决策结果字典
+        """
+        try:
+            self.logger.info("🔍 **步骤4: DOS损失接受性决策**")
+            
+            threshold = dos_threshold_check.get("threshold", 0.5)
+            meets_threshold = dos_threshold_check.get("meets_threshold", False)
+            
+            self.logger.info(f"   🧮 决策逻辑: 预计损失后DOS({dos_value:.2f}) vs 最低控制DOS({threshold:.2f})")
+            
+            if meets_threshold:
+                # DOS值符合要求，可以接受损失
+                output_message = "损失已用DOS覆盖，未进行产量调整"
+                decision = "可以接受损失"
+                action_required = False
+                
+                self.logger.info(f"   ✅ **决策结果: {decision}**")
+                self.logger.info(f"   📢 **输出信息: {output_message}**")
+                self.logger.info("   📋 说明: 预计损失后的DOS值仍高于最低控制阈值，现有库存足以覆盖损失")
+                
+            else:
+                # DOS值低于要求，不可接受损失
+                output_message = f"新DOS预计降为{dos_value:.2f}天"
+                decision = "不可接受损失"
+                action_required = True
+                shortage = abs(dos_threshold_check.get("difference", 0))
+                
+                self.logger.warning(f"   ❌ **决策结果: {decision}**")
+                self.logger.warning(f"   📢 **输出信息: {output_message}**")
+                self.logger.warning(f"   📋 说明: 预计损失后DOS值将低于最低控制阈值{shortage:.2f}天，需要采取产量调整措施")
+                
+                # 建议补偿措施
+                self._suggest_compensation_measures(dos_value, threshold, shortage, event_data)
+            
+            return {
+                "status": "success",
+                "decision": decision,
+                "output_message": output_message,
+                "action_required": action_required,
+                "dos_value": dos_value,
+                "threshold": threshold,
+                "meets_threshold": meets_threshold,
+                "shortage_days": abs(dos_threshold_check.get("difference", 0)) if not meets_threshold else 0,
+                "decision_time": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            error_msg = f"DOS损失接受性决策失败: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "status": "error",
+                "decision": "决策失败",
+                "output_message": f"决策过程出错: {str(e)}",
+                "action_required": False,
+                "error": error_msg
+            }
+    
+    def _suggest_compensation_measures(self, current_dos: float, target_dos: float, 
+                                     shortage_days: float, event_data: Dict[str, Any]):
+        """
+        当DOS不可接受时，建议补偿措施
+        
+        Args:
+            current_dos: 当前预计DOS值
+            target_dos: 目标DOS阈值
+            shortage_days: 短缺天数
+            event_data: 事件数据
+        """
+        try:
+            self.logger.info("💡 **补偿措施建议:**")
+            self.logger.info(f"   📊 当前DOS: {current_dos:.2f}天, 目标DOS: {target_dos:.2f}天, 短缺: {shortage_days:.2f}天")
+            
+            # 获取事件相关信息
+            affected_line = event_data.get("选择产线", "")
+            product_pn = event_data.get("确认产品PN", "")
+            
+            # 计算需要补偿的产量
+            # 基于I值（下两班次出货计划）估算每天需求
+            i_value = 0
+            if "dos_calculation" in event_data:
+                i_value = event_data["dos_calculation"].get("i_value", 0)
+            
+            if i_value > 0:
+                # 假设I值代表2个班次（约0.75天）的出货需求
+                daily_demand = i_value / 0.75
+                shortage_quantity = shortage_days * daily_demand
+                
+                self.logger.info(f"   📊 估算日需求量: {daily_demand:.0f} (基于下两班次出货计划)")
+                self.logger.info(f"   📉 预计短缺产量: {shortage_quantity:.0f}")
+                
+                # 建议具体措施
+                self.logger.info("   🔧 **建议采取以下措施之一:**")
+                self.logger.info(f"   1️⃣ 其他产线转产: 安排其他产线生产{shortage_quantity:.0f}产量的{product_pn}")
+                self.logger.info(f"   2️⃣ 加班补产: {affected_line}产线修复后加班生产补偿短缺")
+                self.logger.info(f"   3️⃣ 调整出货计划: 延后部分订单交付，减少{shortage_days:.1f}天的出货压力")
+                self.logger.info(f"   4️⃣ 紧急采购: 考虑外部采购或借调其他工厂库存")
+            else:
+                self.logger.info("   ⚠️ 无法获取准确需求数据，建议人工评估补偿方案")
+                
+        except Exception as e:
+            self.logger.error(f"生成补偿措施建议失败: {str(e)}")

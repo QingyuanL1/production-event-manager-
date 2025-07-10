@@ -23,6 +23,33 @@ pip install -r config/requirements.txt
 python src/utils/explore_data.py
 ```
 
+### Project Structure
+```
+tableEOO/
+├── main.py                    # Main application entry point
+├── config/
+│   └── requirements.txt       # Python dependencies
+├── src/                       # Source code directory
+│   ├── core/                  # Core business logic modules
+│   │   ├── data_loader.py     # Excel data loading and processing
+│   │   ├── event_manager.py   # Event management logic
+│   │   ├── event_processor.py # Event processing algorithms
+│   │   ├── lca_capacity_loss.py # LCA capacity loss processing
+│   │   └── database_manager.py # SQLite database operations
+│   ├── ui/                    # User interface modules
+│   │   ├── main_ui.py         # Main application GUI
+│   │   └── event_ui.py        # Event management forms
+│   └── utils/                 # Utility modules
+│       └── explore_data.py    # Data exploration tool
+├── data/                      # Data files directory
+│   ├── daily plan.xlsx        # Production schedules
+│   ├── FG EOH.xlsx           # Finished goods inventory
+│   ├── capacity .xlsx        # Production line capacity
+│   ├── Learning Curve.xlsx   # Line change efficiency curves
+│   └── events.db             # SQLite database for events
+└── docs/                     # Documentation (Chinese)
+```
+
 ## Dependencies
 - pandas==2.2.3
 - openpyxl==3.1.5  
@@ -40,52 +67,58 @@ python src/utils/explore_data.py
    - Manages system logging and status updates
    - Integrates event management functionality
 
-2. **data_loader.py** - Data loading and processing module
-   - Contains `DataLoader` class for loading Excel files from `数据表/` directory
+2. **data_loader.py** - Data loading and processing module (src/core/)
+   - Contains `DataLoader` class for loading Excel files from `data/` directory
    - Handles four main data types: HSA Daily Plan, HSA FG EOH, HSA Capacity, Learning Curve
    - Implements special processing for multi-sheet Excel files
    - Performs selective forward-filling for specific columns (not global)
    - Cleans column names, especially datetime formats
 
-3. **event_manager.py** - Event management core logic
+3. **event_manager.py** - Event management core logic (src/core/)
    - Contains `EventManager` class for handling production events
    - Supports five event types: LCA产量损失, 物料情况, SBR信息, PM状态, Drive loading计划
    - Implements multi-level cascading data validation
    - Provides data source integration with Daily Plan and other production data
    - Handles event persistence and export functionality
 
-4. **event_ui.py** - Event management user interface
+4. **event_ui.py** - Event management user interface (src/ui/)
    - Contains `EventFormUI` class for dynamic multi-level form generation
    - Supports up to 7-level cascading dropdown/input forms
    - Implements branch logic for complex event types (SBR, Drive loading)
    - Provides real-time validation and data consistency checks
    - Includes event list management and export features
 
-5. **event_processor.py** - Core business logic for processing production events
+5. **event_processor.py** - Core business logic for processing production events (src/core/)
    - Contains `EventProcessor` class that implements the actual event processing algorithms
    - Handles five event types: LCA产能损失, 物料情况, SBR信息, PM状态, Drive loading计划
    - Implements specific sub-processing for Drive Loading events (date advance/delay, quantity changes, PN changes)
    - Provides result export functionality
    - Integrates with data_loader for accessing production data
 
-6. **lca_capacity_loss.py** - LCA capacity loss processing module
+6. **lca_capacity_loss.py** - LCA capacity loss processing module (src/core/)
    - Contains `LCACapacityLossProcessor` class for handling LCA capacity loss events
-   - Implements 3-shift loss tracking and validation logic
-   - Checks if cumulative losses exceed 10K threshold across previous shifts
-   - Integrates with event data to determine when additional production lines are needed
+   - Implements DOS (Daily Output Shortage) calculation with E, H, I values
+   - Checks if cumulative losses exceed thresholds across shifts
+   - Core business logic for production capacity loss compensation
    - Provides detailed logging and result tracking for LCA processing decisions
 
-7. **database_manager.py** - Database management for event persistence
+7. **database_manager.py** - Database management for event persistence (src/core/)
    - SQLite database integration for storing events and processing results
    - Event CRUD operations with proper data validation
    - Export functionality for event data to Excel format
    - Database statistics and maintenance operations
 
-8. **explore_data.py** - Development utility for examining Excel file structure
+8. **main_ui.py** - Main GUI interface (src/ui/)
+   - Contains `ProductionSchedulingSystem` class for the main application window
+   - Implements tabbed interface with Control Panel, Data Preview, Event Management, Result Analysis
+   - Manages threading for responsive UI during data operations
+   - Integrates all system components into unified interface
+
+9. **explore_data.py** - Development utility for examining Excel file structure (src/utils/)
 
 ### Data Sources
 
-The system works with Excel files in the `数据表/` directory:
+The system works with Excel files in the `data/` directory:
 - `daily plan.xlsx` - Production schedules with multi-row headers
 - `FG EOH.xlsx` - Finished goods inventory data  
 - `capacity .xlsx` - Production line capacity information
@@ -109,7 +142,7 @@ The system works with Excel files in the `数据表/` directory:
 
 - **Control Panel**: Data loading buttons and system controls
 - **Data Preview**: Dynamic table display with sheet selection
-- **Event Management**: Placeholder for future event handling features
+- **Event Management**: Fully functional event handling with five event types
 - **Result Analysis**: Placeholder for future analysis features
 - **System Log**: Real-time logging of operations
 
@@ -171,11 +204,26 @@ When extending this system:
 - **Implementation**: Regex pattern `^F\d+$` filters production lines in both backend and GUI
 - **Impact**: Cleaner UI, prevents selection of invalid production lines like "Forecast", "LCA", "SBR"
 
+## Development Notes
+
+### Testing
+- No formal test framework is currently configured
+- Manual testing is done through the main application
+- Data exploration can be performed using `python src/utils/explore_data.py`
+
+### Code Quality
+- No linting or code quality tools are currently configured
+- Consider adding flake8, black, or similar tools for larger development teams
+
+### Debugging
+- System uses Python's logging module with real-time display in GUI
+- SQLite database (`data/events.db`) stores all events for debugging and analysis
+- Use the explore_data.py utility to examine Excel file structures during development
+
 ## Important Files and Directories
 
 - `data/events.db` - SQLite database storing all events and processing results
-- `data/daily plan.xlsx` - Primary production schedule data source
-- `debug_*.py` - Various debug scripts for testing specific functionality
-- `test_*.py` - Test scripts for different components
-- `功能说明.md` - Feature documentation in Chinese
+- `data/daily plan.xlsx` - Primary production schedule data source  
+- `tools/` - Additional analysis tools (FG EOH analysis)
 - `docs/` - Contains project documentation and requirements in Chinese
+- `log.txt` - Application log file
