@@ -1681,25 +1681,32 @@ class LCACapacityLossProcessor:
             # 获取产线总产能 (假设从capacity数据或固定值获取)
             line_capacity = self._get_line_capacity(target_line)
             
+            # 添加调试信息
+            self.logger.info(f"抵偿产量计算 - 产线{target_line}总产能: {line_capacity}, 计划产量: {planned_production}")
+            
             for event_type in event_types:
                 if event_type in ["LCA", "Manual"]:
                     # LCA/Manual Rework: 按产线空余产能计算
                     spare_capacity = max(0, line_capacity - planned_production)
                     compensation_by_events[event_type] = spare_capacity
+                    self.logger.info(f"  {event_type}事件: 空余产能 = {line_capacity} - {planned_production} = {spare_capacity}")
                     
                 elif "Recycle" in event_type or "HGA" in event_type:
                     # Recycle HGA: 按产线空余产能计算  
                     spare_capacity = max(0, line_capacity - planned_production)
                     compensation_by_events[event_type] = spare_capacity
+                    self.logger.info(f"  {event_type}事件: 空余产能 = {line_capacity} - {planned_production} = {spare_capacity}")
                     
                 elif event_type == "PM":
                     # PM: 固定占用2小时，按比例计算 (2/11 × 总产量)
                     pm_compensation = (2.0 / 11.0) * planned_production
                     compensation_by_events[event_type] = pm_compensation
+                    self.logger.info(f"  {event_type}事件: 2小时抵偿 = 2/11 × {planned_production} = {pm_compensation:.0f}")
                     
                 else:
                     # 其他未知事件类型，暂时设为0
                     compensation_by_events[event_type] = 0.0
+                    self.logger.info(f"  {event_type}事件: 未知类型，设为0")
             
             return compensation_by_events
             
