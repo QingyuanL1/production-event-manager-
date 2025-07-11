@@ -300,7 +300,7 @@ class LCACapacityLossProcessor:
                         line_value = row[line_column]
                         if pd.notna(line_value) and target_line in str(line_value):
                             target_line_row = idx
-                            self.logger.info(f"找到目标产线 {target_line} 在行 {idx}")
+                            # 移除重复的日志输出
                             break
                     
                     # 查找最近的forecast行（在目标产线之前）
@@ -1417,6 +1417,9 @@ class LCACapacityLossProcessor:
         adjustment_options = []
         
         try:
+            viable_count = 0
+            total_potential_adjustment = 0
+            
             for shift_info in subsequent_shifts:
                 date = shift_info["date"]
                 shift = shift_info["shift"]
@@ -1442,7 +1445,12 @@ class LCACapacityLossProcessor:
                 
                 adjustment_options.append(option)
                 
-                self.logger.info(f"  {date} {shift}: 计划{planned_production:.0f}, 可调整{potential_adjustment:.0f} {'✅' if viable else '❌'}")
+                if viable:
+                    viable_count += 1
+                    total_potential_adjustment += potential_adjustment
+            
+            # 只输出汇总信息
+            self.logger.info(f"后续班次评估: {viable_count}/{len(subsequent_shifts)}班次可调整, 总潜在调整量{total_potential_adjustment:.0f}")
             
             return adjustment_options
             
@@ -1493,6 +1501,7 @@ class LCACapacityLossProcessor:
                 }
             
             conflict_results = []
+            total_events = 0
             
             for shift_opt in viable_shifts:
                 date = shift_opt["date"]
@@ -1513,12 +1522,14 @@ class LCACapacityLossProcessor:
                 }
                 
                 conflict_results.append(event_info)
-                
-                # 输出检查结果
-                self.logger.info(f"  {date} {shift}: 事件数量 {event_count}")
+                total_events += event_count
             
             # 判断是否有任何事件
             has_any_events = any(result["has_events"] for result in conflict_results)
+            
+            # 只输出汇总结果
+            shifts_with_events = sum(1 for result in conflict_results if result["has_events"])
+            self.logger.info(f"事件检查结果: {shifts_with_events}/{len(viable_shifts)}班次有事件, 总事件数{total_events}")
             
             return {
                 "status": "success",
