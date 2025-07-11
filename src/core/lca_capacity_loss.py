@@ -1507,8 +1507,8 @@ class LCACapacityLossProcessor:
                 date = shift_opt["date"]
                 shift = shift_opt["shift"]
                 
-                # 检查该班次的事件数量
-                event_count = self._count_events_in_shift(
+                # 检查该班次的事件信息（数量和类型）
+                event_info_result = self._count_events_in_shift(
                     daily_plan, date, shift
                 )
                 
@@ -1517,25 +1517,53 @@ class LCACapacityLossProcessor:
                     "shift": shift,
                     "sequence": shift_opt.get("sequence", 0),
                     "planned_production": shift_opt.get("planned_production", 0),
-                    "event_count": event_count,
-                    "has_events": event_count > 0
+                    "event_count": event_info_result["count"],
+                    "event_types": event_info_result["types"],
+                    "event_details": event_info_result["details"],
+                    "has_events": event_info_result["count"] > 0
                 }
                 
                 conflict_results.append(event_info)
-                total_events += event_count
+                total_events += event_info_result["count"]
             
             # 判断是否有任何事件
             has_any_events = any(result["has_events"] for result in conflict_results)
             
-            # 只输出汇总结果
+            # 输出详细的事件检查结果
             shifts_with_events = sum(1 for result in conflict_results if result["has_events"])
+            
+            # 汇总所有事件类型
+            all_event_types = set()
+            for result in conflict_results:
+                all_event_types.update(result.get("event_types", []))
+            
             self.logger.info(f"事件检查结果: {shifts_with_events}/{len(viable_shifts)}班次有事件, 总事件数{total_events}")
+            
+            if all_event_types:
+                self.logger.info(f"发现事件类型: {', '.join(sorted(all_event_types))}")
+            
+            # 输出每个有事件的班次详情
+            for result in conflict_results:
+                if result["has_events"]:
+                    date = result["date"]
+                    shift = result["shift"]
+                    event_types = result.get("event_types", [])
+                    event_count = result.get("event_count", 0)
+                    
+                    if event_types:
+                        types_str = ', '.join(event_types)
+                        self.logger.info(f"  {date} {shift}: {event_count}个事件 [{types_str}]")
+                    else:
+                        self.logger.info(f"  {date} {shift}: {event_count}个事件")
             
             return {
                 "status": "success",
                 "message": f"检查了{len(viable_shifts)}个班次的事件数量",
                 "checked_shifts": conflict_results,
                 "has_events": has_any_events,
+                "total_events": total_events,
+                "event_types_found": list(all_event_types),
+                "shifts_with_events": shifts_with_events,
                 "check_count": check_count
             }
             
@@ -1548,9 +1576,9 @@ class LCACapacityLossProcessor:
             }
     
     def _count_events_in_shift(self, daily_plan: pd.DataFrame, 
-                             date: str, shift: str) -> int:
+                             date: str, shift: str) -> Dict[str, Any]:
         """
-        统计指定班次的事件数量
+        统计指定班次的事件信息（数量和类型）
         
         Args:
             daily_plan: Daily Plan DataFrame
@@ -1558,9 +1586,10 @@ class LCACapacityLossProcessor:
             shift: 班次
             
         Returns:
-            事件数量
+            事件信息字典，包含数量和类型列表
         """
         event_count = 0
+        event_types = []
         
         try:
             # 目标事件类型
@@ -1583,12 +1612,13 @@ class LCACapacityLossProcessor:
                         break
             
             if target_column is None:
-                return event_count
+                return {"count": 0, "types": [], "details": []}
             
             # 检查Line列中的事件类型
             line_column = daily_plan.columns[0]
+            event_details = []
             
-            for idx, row in daily_plan.iterrows():
+            for row_idx, row in daily_plan.iterrows():
                 line_value = row[line_column]
                 
                 if pd.notna(line_value):
@@ -1602,12 +1632,23 @@ class LCACapacityLossProcessor:
                             
                             if pd.notna(event_value) and event_value != 0:
                                 event_count += 1
+                                if event_type not in event_types:
+                                    event_types.append(event_type)
+                                event_details.append({
+                                    "type": event_type,
+                                    "line_description": line_str,
+                                    "value": event_value
+                                })
                                 break  # 避免同一行重复计数
             
-            return event_count
+            return {
+                "count": event_count,
+                "types": event_types,
+                "details": event_details
+            }
             
         except Exception:
-            return event_count
+            return {"count": 0, "types": [], "details": []}
     
     def _format_date_from_column(self, date_obj) -> str:
         """
