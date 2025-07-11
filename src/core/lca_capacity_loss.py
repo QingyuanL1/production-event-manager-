@@ -46,42 +46,26 @@ class LCACapacityLossProcessor:
         Returns:
             处理结果字典
         """
-        self.logger.info("=" * 60)
-        self.logger.info("🚀 **开始处理LCA产能损失事件**")
-        self.logger.info(f"当前事件信息: 日期={event_data.get('选择影响日期')}, 班次={event_data.get('选择影响班次')}, 产线={event_data.get('选择产线')}")
+        self.logger.info("🚀 **LCA产能损失事件处理**")
+        self.logger.info(f"事件: {event_data.get('选择影响日期')} {event_data.get('选择影响班次')} {event_data.get('选择产线')}")
         
         try:
-            # 步骤0：首先计算本班预测产量 I
-            self.logger.info("📊 **步骤0: 计算本班预测产量 I...**")
+            # 步骤0：计算本班预测产量
             forecast_calculation = self._calculate_shift_forecast_i(event_data)
             
             if forecast_calculation["status"] == "success":
-                self.logger.info("✅ **本班预测产量计算成功:**")
-                self.logger.info(f"   📈 E (本班出货计划): {forecast_calculation['E']}")
-                self.logger.info(f"   📉 C (已损失产量): {forecast_calculation['C']}")
-                self.logger.info(f"   ⏱️ D (剩余修理时间): {forecast_calculation['D']}小时")
-                self.logger.info(f"   🧮 计算公式: F = E - C - D*(E/11)")
-                self.logger.info(f"   🎯 **F (本班预测产量 I): {forecast_calculation['F']:.2f}**")
-                self.logger.info(f"   ⚡ 每小时产能损失: {forecast_calculation['capacity_loss_per_hour']:.2f}")
-                self.logger.info(f"   📊 总产能损失: {forecast_calculation['total_capacity_loss']:.2f}")
+                self.logger.info(f"本班预测产量: {forecast_calculation['F']:.2f} (E={forecast_calculation['E']}, C={forecast_calculation['C']}, D={forecast_calculation['D']}h)")
             else:
-                self.logger.error(f"❌ 本班预测产量计算失败: {forecast_calculation['message']}")
+                self.logger.error(f"本班预测产量计算失败: {forecast_calculation['message']}")
             
-            # 步骤1：检查前3个班次都有报告损失，且累计损失超过10K
-            self.logger.info("🔍 **步骤1: 开始检查前3个班次的损失情况...**")
+            # 步骤1：检查前3班次损失
             check_result = self._check_previous_shifts_loss(event_data)
             
-            self.logger.info(f"📋 **检查结果统计:**")
-            self.logger.info(f"   - 检查班次数: {check_result.get('shifts_checked', 0)}")
-            self.logger.info(f"   - 有损失班次: {check_result.get('shifts_with_loss', 0)}")
-            self.logger.info(f"   - 累计损失: {check_result.get('total_loss', 0):.0f}")
-            self.logger.info(f"   - 所有班次都有损失: {check_result.get('all_shifts_have_loss', False)}")
-            self.logger.info(f"   - 损失超过10K: {check_result.get('total_exceeds_10k', False)}")
+            self.logger.info(f"前3班次检查: {check_result.get('shifts_with_loss', 0)}/{check_result.get('shifts_checked', 0)}班次有损失, 累计{check_result.get('total_loss', 0):.0f}")
             
             # 根据损失检查结果决定后续流程
             if check_result["has_sufficient_loss"]:
-                self.logger.info("✅ **判定结果: 前3个班次累计损失超过10K，建议加线**")
-                self.logger.info("🏭 **输出建议: 产线状况不佳，考虑加线**")
+                self.logger.info("🔧 建议加线 (前3班次累计损失>10K)")
                 
                 return {
                     "status": "add_line_required",
@@ -93,16 +77,14 @@ class LCACapacityLossProcessor:
                     "event_data": event_data
                 }
             else:
-                self.logger.info("ℹ️ **判定结果: 未达到加线条件，继续计算DOS**")
-                self.logger.info(f"📝 原因: {check_result.get('reason', '未知')}")
+                self.logger.info("➡️ 继续DOS计算")
                 
-                # 步骤2：只有在不需要加线时才执行DOS计算
+                # 步骤2：计算DOS
                 dos_calculation = self._calculate_new_dos(event_data, forecast_calculation)
                 
                 # 检查是否需要跳出事件
                 if dos_calculation.get("status") == "skip_event":
-                    self.logger.info("⚠️ **事件处理结果: 跳出事件**")
-                    self.logger.info(f"📝 原因: {dos_calculation.get('message')}")
+                    self.logger.info(f"⏭️ 跳出事件: {dos_calculation.get('message')}")
                     return {
                         "status": "skip_event",
                         "message": dos_calculation.get('message'),
@@ -114,7 +96,7 @@ class LCACapacityLossProcessor:
                         "event_data": event_data
                     }
                 
-                # 步骤3：DOS阈值检查
+                # 步骤3：DOS阈值检查和决策
                 dos_threshold_check = None
                 dos_acceptance_decision = None
                 
@@ -122,19 +104,13 @@ class LCACapacityLossProcessor:
                     dos_value = dos_calculation.get("dos_value", 0.0)
                     dos_threshold_check = self._check_dos_threshold(dos_value)
                     
-                    self.logger.info("🎯 **步骤3: DOS阈值检查结果**")
-                    self.logger.info(f"   📊 计算DOS值: {dos_value:.2f} 天")
-                    self.logger.info(f"   🎚️ 最低阈值: {dos_threshold_check['threshold']:.2f} 天")
-                    self.logger.info(f"   ✅ 是否符合要求: {'是' if dos_threshold_check['meets_threshold'] else '否'}")
-                    self.logger.info(f"   📝 {dos_threshold_check['message']}")
-                    
-                    if not dos_threshold_check['meets_threshold']:
-                        self.logger.warning("⚠️ **DOS值低于最低阈值要求！**")
+                    self.logger.info(f"DOS计算结果: {dos_value:.2f}天 (阈值: {dos_threshold_check['threshold']:.2f}天)")
                     
                     # 步骤4：DOS损失接受性决策
                     dos_acceptance_decision = self._make_dos_acceptance_decision(
                         dos_value, 
                         dos_threshold_check, 
+                        dos_calculation,
                         event_data
                     )
                 
@@ -154,14 +130,12 @@ class LCACapacityLossProcessor:
             
         except Exception as e:
             error_msg = f"处理LCA产能损失事件失败: {str(e)}"
-            self.logger.error(f"❌ **{error_msg}**")
+            self.logger.error(f"❌ {error_msg}")
             return {
                 "status": "error",
                 "message": error_msg,
                 "event_data": event_data
             }
-        finally:
-            self.logger.info("=" * 60)
     
     def _calculate_shift_forecast_i(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -307,21 +281,15 @@ class LCACapacityLossProcessor:
             
             if target_line and (caller_name == "_get_next_two_shifts_forecast" or caller_name == "_calculate_new_dos"):
                 # 这是DOS计算中的I值获取或H值获取，使用产线行数据
-                target_line_row = None
                 for idx, row in df_with_shifts.iterrows():
                     line_value = row[line_column]
                     if pd.notna(line_value) and target_line in str(line_value):
-                        target_line_row = idx
-                        self.logger.info(f"找到目标产线 {target_line} 在行 {idx}")
-                        
                         # 直接从该产线行获取目标列的值
                         line_value = row[target_column]
                         if pd.notna(line_value) and line_value != 0:
-                            self.logger.info(f"找到 {target_line} 的数值: {line_value}")
                             return float(line_value)
                         else:
                             # 如果产线行在该班次没有值，返回0
-                            self.logger.info(f"{target_line} 在 {date} {shift} 班次无数值，返回0")
                             return 0.0
             else:
                 # 这是本班预测产量计算的E值获取，使用Forecast行
@@ -357,7 +325,6 @@ class LCACapacityLossProcessor:
                                     closest_forecast_value = forecast_value
                         
                         if closest_forecast_value is not None:
-                            self.logger.info(f"找到 {target_line} 关联的forecast值: {closest_forecast_value}")
                             return float(closest_forecast_value)
             
             # 如果没有指定产线或没有找到相关forecast，使用原始逻辑（找第一个非零forecast）
@@ -366,11 +333,8 @@ class LCACapacityLossProcessor:
                 if pd.notna(line_value) and "forecast" in str(line_value).lower():
                     forecast_value = row[target_column]
                     if pd.notna(forecast_value) and forecast_value != 0:
-                        if target_line:
-                            self.logger.warning(f"未找到 {target_line} 的专用forecast，使用第一个非零forecast: {forecast_value}")
                         return float(forecast_value)
             
-            self.logger.warning(f"未找到 {date} {shift} 的forecast数据")
             return 0.0
             
         except Exception as e:
@@ -415,25 +379,17 @@ class LCACapacityLossProcessor:
             
             # 获取前3个班次的信息
             previous_shifts = self._get_previous_3_shifts(current_date, current_shift)
-            self.logger.info(f"📅 **计算得出前3个班次:**")
-            for i, shift in enumerate(previous_shifts, 1):
-                self.logger.info(f"   {i}. {shift['date']} {shift['shift']}")
             
             # 检查每个班次是否有损失报告
-            self.logger.info(f"🔍 **开始查询各班次的损失数据...**")
             shifts_with_loss = []
             total_loss = 0
             
-            for i, shift_info in enumerate(previous_shifts, 1):
-                self.logger.info(f"   查询第{i}个班次: {shift_info['date']} {shift_info['shift']}")
+            for shift_info in previous_shifts:
                 loss_data = self._get_shift_loss_data(shift_info, current_line, daily_plan_data)
                 
                 if loss_data["has_loss"]:
                     shifts_with_loss.append(loss_data)
                     total_loss += loss_data["loss_amount"]
-                    self.logger.info(f"   ✅ 找到损失记录: {loss_data['loss_amount']:.0f}")
-                else:
-                    self.logger.info(f"   ❌ 无损失记录: {loss_data.get('reason', '未找到匹配事件')}")
             
             # 判断是否满足条件：前3个班次都有损失报告 且 累计损失超过10K
             all_shifts_have_loss = len(shifts_with_loss) >= 3
@@ -451,7 +407,6 @@ class LCACapacityLossProcessor:
                 "reason": self._get_check_reason(all_shifts_have_loss, total_exceeds_10k, total_loss)
             }
             
-            self.logger.info(f"检查结果: {result['reason']}")
             return result
             
         except Exception as e:
@@ -509,7 +464,6 @@ class LCACapacityLossProcessor:
             
             # 提取所有可用的日期-班次组合
             available_shifts = self._extract_available_shifts(daily_plan)
-            self.logger.info(f"📊 从Daily Plan提取到 {len(available_shifts)} 个可用班次")
             
             # 找到当前班次在可用班次列表中的位置
             current_position = self._find_current_shift_position(available_shifts, current_date, current_shift)
@@ -529,8 +483,6 @@ class LCACapacityLossProcessor:
                         "datetime": shift_info["datetime"],
                         "position": pos
                     })
-                else:
-                    self.logger.info(f"无法找到第{i}个前置班次（索引超出范围）")
             
             return previous_shifts
             
@@ -608,11 +560,6 @@ class LCACapacityLossProcessor:
             shift_order = {'T1': 1, 'T2': 2, 'T3': 3, 'T4': 4}
             available_shifts.sort(key=lambda x: (x["datetime"], shift_order.get(x["shift"], 5)))
             
-            self.logger.info(f"提取到 {len(available_shifts)} 个可用班次")
-            if available_shifts:
-                self.logger.info("可用班次示例:")
-                for shift in available_shifts[:5]:  # 显示前5个作为示例
-                    self.logger.info(f"  {shift['date']} {shift['shift']} ({shift['day_of_week']})")
             
             return available_shifts
             
@@ -634,10 +581,8 @@ class LCACapacityLossProcessor:
         """
         for i, shift_info in enumerate(available_shifts):
             if shift_info["date"] == current_date and shift_info["shift"] == current_shift:
-                self.logger.info(f"找到当前班次位置: 索引 {i}")
                 return i
         
-        self.logger.warning(f"未找到当前班次 {current_date} {current_shift}")
         return -1
     
     def _get_shift_loss_data(self, shift_info: Dict[str, str], line: str, daily_plan: pd.DataFrame) -> Dict[str, Any]:
@@ -1116,7 +1061,8 @@ class LCACapacityLossProcessor:
             return "标准处理（建议生成失败）"
     
     def _make_dos_acceptance_decision(self, dos_value: float, 
-                                    dos_threshold_check: Dict[str, Any], 
+                                    dos_threshold_check: Dict[str, Any],
+                                    dos_calculation: Dict[str, Any], 
                                     event_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         根据DOS阈值检查结果做出DOS损失接受性决策
@@ -1158,14 +1104,14 @@ class LCACapacityLossProcessor:
                 action_required = True
                 shortage = abs(dos_threshold_check.get("difference", 0))
                 
-                self.logger.warning(f"   ❌ **决策结果: {decision}**")
-                self.logger.warning(f"   📢 **输出信息: {output_message}**")
-                self.logger.warning(f"   📋 说明: 预计损失后DOS值将低于最低控制阈值{shortage:.2f}天，需要采取产量调整措施")
+                self.logger.warning(f"❌ {decision}: {output_message}, 短缺{shortage:.2f}天")
                 
-                # 建议补偿措施
-                self._suggest_compensation_measures(dos_value, threshold, shortage, event_data)
+                # 计算具体的补偿产量
+                compensation_calculation = self._calculate_compensation_production(
+                    dos_value, threshold, dos_calculation, event_data
+                )
             
-            return {
+            result = {
                 "status": "success",
                 "decision": decision,
                 "output_message": output_message,
@@ -1176,6 +1122,12 @@ class LCACapacityLossProcessor:
                 "shortage_days": abs(dos_threshold_check.get("difference", 0)) if not meets_threshold else 0,
                 "decision_time": datetime.now().isoformat()
             }
+            
+            # 如果需要补偿，添加补偿计算信息
+            if not meets_threshold:
+                result["compensation_calculation"] = compensation_calculation
+                
+            return result
             
         except Exception as e:
             error_msg = f"DOS损失接受性决策失败: {str(e)}"
@@ -1188,47 +1140,98 @@ class LCACapacityLossProcessor:
                 "error": error_msg
             }
     
-    def _suggest_compensation_measures(self, current_dos: float, target_dos: float, 
-                                     shortage_days: float, event_data: Dict[str, Any]):
+    
+    def _calculate_compensation_production(self, current_dos: float, target_dos: float, 
+                                         dos_calculation: Dict[str, Any], 
+                                         _: Dict[str, Any]) -> Dict[str, Any]:
         """
-        当DOS不可接受时，建议补偿措施
+        计算剩余产量补偿数据
+        
+        根据公式：
+        - 预测损失后DOS: G' = (G+F-H)/I  (已计算得到 = current_dos)
+        - 最低控制DOS: J = target_dos
+        - 需要达到的补偿后产量: F' = J*I + H - G
+        - 实际需要补偿的产量: F' - F
         
         Args:
-            current_dos: 当前预计DOS值
-            target_dos: 目标DOS阈值
-            shortage_days: 短缺天数
+            current_dos: 当前预测损失后DOS值 (G')
+            target_dos: 最低控制DOS值 (J)
+            dos_calculation: DOS计算结果，包含G、F、H、I值
             event_data: 事件数据
+            
+        Returns:
+            补偿计算结果字典
         """
         try:
-            self.logger.info("💡 **补偿措施建议:**")
-            self.logger.info(f"   📊 当前DOS: {current_dos:.2f}天, 目标DOS: {target_dos:.2f}天, 短缺: {shortage_days:.2f}天")
+            self.logger.info("🧮 步骤4.1: 计算补偿产量")
             
-            # 获取事件相关信息
-            affected_line = event_data.get("选择产线", "")
-            product_pn = event_data.get("确认产品PN", "")
+            # 从DOS计算结果中获取各个参数
+            G = dos_calculation.get("g_value", 0)  # 上一个班的合计EOH
+            F = dos_calculation.get("f_value", 0)  # 本班预计产量
+            H = dos_calculation.get("h_value", 0)  # 本班安排产量
+            I = dos_calculation.get("i_value", 0)  # 下两个班次出货计划
             
-            # 计算需要补偿的产量
-            # 基于I值（下两班次出货计划）估算每天需求
-            i_value = 0
-            if "dos_calculation" in event_data:
-                i_value = event_data["dos_calculation"].get("i_value", 0)
             
-            if i_value > 0:
-                # 假设I值代表2个班次（约0.75天）的出货需求
-                daily_demand = i_value / 0.75
-                shortage_quantity = shortage_days * daily_demand
-                
-                self.logger.info(f"   📊 估算日需求量: {daily_demand:.0f} (基于下两班次出货计划)")
-                self.logger.info(f"   📉 预计短缺产量: {shortage_quantity:.0f}")
-                
-                # 建议具体措施
-                self.logger.info("   🔧 **建议采取以下措施之一:**")
-                self.logger.info(f"   1️⃣ 其他产线转产: 安排其他产线生产{shortage_quantity:.0f}产量的{product_pn}")
-                self.logger.info(f"   2️⃣ 加班补产: {affected_line}产线修复后加班生产补偿短缺")
-                self.logger.info(f"   3️⃣ 调整出货计划: 延后部分订单交付，减少{shortage_days:.1f}天的出货压力")
-                self.logger.info(f"   4️⃣ 紧急采购: 考虑外部采购或借调其他工厂库存")
+            # 验证参数有效性
+            if I <= 0:
+                return {
+                    "status": "error",
+                    "message": "下两班次出货计划为0，无法计算补偿产量",
+                    "compensation_needed": 0
+                }
+            
+            # 计算需要达到的补偿后总产量 F'
+            # 公式: F' = J*I + H - G
+            F_prime = target_dos * I + H - G
+            
+            # 实际需要补偿的产量
+            compensation_needed = F_prime - F
+            
+            self.logger.info(f"   🧮 **补偿产量计算:**")
+            self.logger.info(f"      公式: F' = J*I + H - G")
+            self.logger.info(f"      计算: F' = {target_dos:.2f}*{I:.2f} + {H:.2f} - {G:.2f}")
+            self.logger.info(f"      补偿后总产量 F': {F_prime:.2f}")
+            self.logger.info(f"      当前预计产量 F: {F:.2f}")
+            self.logger.info(f"      **需要补偿产量: {compensation_needed:.2f}**")
+            
+            verification_dos = (G + F_prime - H) / I
+            self.logger.info(f"   ✅ **验算:**")
+            self.logger.info(f"      用F'计算DOS: ({G:.2f} + {F_prime:.2f} - {H:.2f}) / {I:.2f} = {verification_dos:.2f}")
+            self.logger.info(f"      是否达到目标 {target_dos:.2f}: {'✅ 是' if abs(verification_dos - target_dos) < 0.01 else '❌ 否'}")
+            
+            # 补偿产量分析
+            if compensation_needed <= 0:
+                compensation_type = "无需补偿"
+            elif compensation_needed < 1000:
+                compensation_type = "少量补偿"
+            elif compensation_needed < 5000:
+                compensation_type = "中等补偿"
             else:
-                self.logger.info("   ⚠️ 无法获取准确需求数据，建议人工评估补偿方案")
-                
+                compensation_type = "大量补偿"
+            
+            return {
+                "status": "success",
+                "message": f"补偿产量计算完成",
+                "current_dos": current_dos,
+                "target_dos": target_dos,
+                "original_production": F,
+                "required_total_production": F_prime,
+                "compensation_needed": compensation_needed,
+                "compensation_type": compensation_type,
+                "verification_dos": verification_dos,
+                "parameters": {
+                    "G": G, "F": F, "H": H, "I": I,
+                    "F_prime": F_prime
+                },
+                "formula": f"F' = J*I + H - G = {target_dos:.2f}*{I:.2f} + {H:.2f} - {G:.2f} = {F_prime:.2f}",
+                "calculation_time": datetime.now().isoformat()
+            }
+            
         except Exception as e:
-            self.logger.error(f"生成补偿措施建议失败: {str(e)}")
+            error_msg = f"计算补偿产量失败: {str(e)}"
+            self.logger.error(error_msg)
+            return {
+                "status": "error",
+                "message": error_msg,
+                "compensation_needed": 0
+            }

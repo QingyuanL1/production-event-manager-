@@ -162,13 +162,17 @@ The system works with Excel files in the `data/` directory:
 - ✅ Data validation and logical consistency checks
 - ✅ Event export functionality
 - ✅ Event processing framework with EventProcessor class
-- ✅ LCA capacity loss processing logic (完整实现)
+- ✅ **LCA capacity loss processing logic (完整实现，简化版本)**
+- ✅ **DOS calculation and threshold management (DOS计算和阈值管理)**
+- ✅ **Compensation production calculation (补偿产量计算)**
+- ✅ **DOS acceptance decision flow (DOS损失接受性决策流程)**
 - ✅ Database integration for event storage (SQLite)
 - ✅ Automatic LCA processing on event creation
 - ✅ Multi-shift loss tracking and validation
 - ✅ **GUI cascading selection system (智能级联选择)**
 - ✅ **Dynamic data source integration (动态数据源集成)**
 - ✅ **Production line filtering (F-series only)**
+- ✅ **Simplified logging output (简化日志输出)**
 - ⚠️ Other event type processing algorithms (framework complete, business logic partially implemented)
 - ❌ Result analysis (placeholder)
 - ❌ Production plan adjustment logic
@@ -191,6 +195,17 @@ When extending this system:
 12. Use regex filtering for production line validation to maintain F-series only display
 
 ## Recent Major Updates (Level 3 Priority for New Developers)
+
+### LCA DOS Decision Flow Implementation (July 2025)
+- **Problem Solved**: Implemented complete DOS (Days of Supply) calculation and decision workflow for LCA capacity loss events
+- **Solution**: Added DOS threshold management, acceptance decision logic, and compensation calculation
+- **Key Files Modified**: `src/core/lca_capacity_loss.py`, `src/core/database_manager.py`, `src/ui/main_ui.py`
+- **Core Features**:
+  - DOS calculation formula: (G+F-H)/I
+  - Configurable DOS thresholds with database storage (default 0.5 days)
+  - Compensation production calculation: F' = J*I + H - G
+  - Decision outcomes: "损失已用DOS覆盖" vs "新DOS预计降为X.XX天"
+- **Logging**: Simplified to show only essential calculations and indicators (no suggestions/recommendations)
 
 ### GUI Cascading Selection System (December 2024)
 - **Problem Solved**: Event forms were using static dropdown options instead of dynamic data from Daily Plan
