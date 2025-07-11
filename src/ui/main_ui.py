@@ -766,41 +766,63 @@ class ProductionSchedulingSystem:
         Open DOS configuration dialog.
         """
         try:
-            # 直接使用简单的输入对话框
+            # 获取当前配置
             current_threshold = self.event_manager.db_manager.get_dos_threshold()
+            current_shift_count = self.event_manager.db_manager.get_shift_check_count()
             
-            # 创建简单对话框
+            # 创建配置对话框
             dialog = tk.Toplevel(self.root)
-            dialog.title("DOS阈值配置")
-            dialog.geometry("350x200")
+            dialog.title("LCA处理配置")
+            dialog.geometry("400x280")
             dialog.transient(self.root)
             dialog.grab_set()
             
             # 居中显示
             dialog.update_idletasks()
-            x = (dialog.winfo_screenwidth() // 2) - (350 // 2)
-            y = (dialog.winfo_screenheight() // 2) - (200 // 2)
-            dialog.geometry(f"350x200+{x}+{y}")
+            x = (dialog.winfo_screenwidth() // 2) - (400 // 2)
+            y = (dialog.winfo_screenheight() // 2) - (280 // 2)
+            dialog.geometry(f"400x280+{x}+{y}")
             
             # 主框架
             main_frame = ttk.Frame(dialog)
             main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
             
             # 标题
-            ttk.Label(main_frame, text="DOS阈值配置", font=("Arial", 14, "bold")).pack(pady=(0, 15))
+            ttk.Label(main_frame, text="LCA处理配置", font=("Arial", 14, "bold")).pack(pady=(0, 15))
             
-            # 当前值显示
-            ttk.Label(main_frame, text=f"当前阈值: {current_threshold:.1f} 天").pack(pady=(0, 10))
+            # DOS阈值配置
+            dos_frame = ttk.LabelFrame(main_frame, text="DOS阈值设置")
+            dos_frame.pack(fill=tk.X, pady=(0, 15))
             
-            # 输入框
-            input_frame = ttk.Frame(main_frame)
-            input_frame.pack(pady=(0, 20))
+            # 当前DOS值显示
+            ttk.Label(dos_frame, text=f"当前阈值: {current_threshold:.1f} 天").pack(pady=5)
             
-            ttk.Label(input_frame, text="新阈值:").pack(side=tk.LEFT)
+            # DOS输入框
+            dos_input_frame = ttk.Frame(dos_frame)
+            dos_input_frame.pack(pady=5)
+            
+            ttk.Label(dos_input_frame, text="新阈值:").pack(side=tk.LEFT)
             threshold_var = tk.StringVar(value=f"{current_threshold:.1f}")
-            threshold_entry = ttk.Entry(input_frame, textvariable=threshold_var, width=8)
+            threshold_entry = ttk.Entry(dos_input_frame, textvariable=threshold_var, width=8)
             threshold_entry.pack(side=tk.LEFT, padx=(5, 5))
-            ttk.Label(input_frame, text="天").pack(side=tk.LEFT)
+            ttk.Label(dos_input_frame, text="天").pack(side=tk.LEFT)
+            
+            # 班次检查数量配置
+            shift_frame = ttk.LabelFrame(main_frame, text="班次检查设置")
+            shift_frame.pack(fill=tk.X, pady=(0, 15))
+            
+            # 当前班次检查数量显示
+            ttk.Label(shift_frame, text=f"当前检查班次数: {current_shift_count} 个").pack(pady=5)
+            
+            # 班次检查数量输入框
+            shift_input_frame = ttk.Frame(shift_frame)
+            shift_input_frame.pack(pady=5)
+            
+            ttk.Label(shift_input_frame, text="检查班次数:").pack(side=tk.LEFT)
+            shift_count_var = tk.StringVar(value=str(current_shift_count))
+            shift_count_entry = ttk.Entry(shift_input_frame, textvariable=shift_count_var, width=8)
+            shift_count_entry.pack(side=tk.LEFT, padx=(5, 5))
+            ttk.Label(shift_input_frame, text="个").pack(side=tk.LEFT)
             
             # 按钮框架
             button_frame = ttk.Frame(main_frame)
@@ -809,27 +831,47 @@ class ProductionSchedulingSystem:
             def save_and_close():
                 try:
                     new_threshold = float(threshold_var.get())
-                    if 0.1 <= new_threshold <= 5.0:
-                        success = self.event_manager.db_manager.set_dos_threshold(
-                            new_threshold, 
-                            description="GUI直接设置"
-                        )
-                        if success:
-                            messagebox.showinfo("成功", f"DOS阈值已设置为 {new_threshold:.1f} 天")
-                            self.log_message("INFO", f"DOS阈值已更新为 {new_threshold:.1f} 天")
-                            dialog.destroy()
-                        else:
-                            messagebox.showerror("错误", "保存失败")
+                    new_shift_count = int(shift_count_var.get())
+                    
+                    # 验证输入范围
+                    if not (0.1 <= new_threshold <= 5.0):
+                        messagebox.showerror("错误", "DOS阈值必须在0.1到5.0之间")
+                        return
+                    
+                    if not (1 <= new_shift_count <= 10):
+                        messagebox.showerror("错误", "检查班次数必须在1到10之间")
+                        return
+                    
+                    # 保存配置
+                    dos_success = self.event_manager.db_manager.set_dos_threshold(
+                        new_threshold, 
+                        description="GUI设置"
+                    )
+                    shift_success = self.event_manager.db_manager.set_shift_check_count(
+                        new_shift_count,
+                        description="GUI设置"
+                    )
+                    
+                    if dos_success and shift_success:
+                        messagebox.showinfo("成功", 
+                            f"配置已保存:\n"
+                            f"DOS阈值: {new_threshold:.1f} 天\n"
+                            f"检查班次数: {new_shift_count} 个")
+                        self.log_message("INFO", 
+                            f"LCA配置已更新: DOS阈值={new_threshold:.1f}天, 检查班次数={new_shift_count}个")
+                        dialog.destroy()
                     else:
-                        messagebox.showerror("错误", "阈值必须在0.1到5.0之间")
+                        messagebox.showerror("错误", "保存失败")
+                        
                 except ValueError:
                     messagebox.showerror("错误", "请输入有效数字")
             
             def reset_and_close():
-                if messagebox.askyesno("确认", "重置为默认0.5天？"):
+                if messagebox.askyesno("确认", "重置为默认配置？\nDOS阈值: 0.5天\n检查班次数: 2个"):
                     self.event_manager.db_manager.set_dos_threshold(0.5)
+                    self.event_manager.db_manager.set_shift_check_count(2)
                     messagebox.showinfo("成功", "已重置为默认配置")
-                    self.log_message("INFO", "DOS阈值已重置为默认值")
+                    self.log_message("INFO", "LCA配置已重置为默认值")
                     dialog.destroy()
             
             # 按钮
@@ -837,7 +879,7 @@ class ProductionSchedulingSystem:
             ttk.Button(button_frame, text="重置默认", command=reset_and_close).pack(side=tk.LEFT, padx=(0, 10))
             ttk.Button(button_frame, text="取消", command=dialog.destroy).pack(side=tk.RIGHT)
             
-            # 焦点到输入框
+            # 焦点到DOS输入框
             threshold_entry.focus()
             threshold_entry.select_range(0, tk.END)
             

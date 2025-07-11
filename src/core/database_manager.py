@@ -103,12 +103,19 @@ class DatabaseManager:
                     )
                 ''')
                 
+                # 检查是否需要添加shift_check_count列（数据库迁移）
+                cursor.execute("PRAGMA table_info(dos_range_config)")
+                columns = [column[1] for column in cursor.fetchall()]
+                if 'shift_check_count' not in columns:
+                    cursor.execute('ALTER TABLE dos_range_config ADD COLUMN shift_check_count INTEGER DEFAULT 2')
+                    self.logger.info("已添加shift_check_count列到dos_range_config表")
+                
                 # 插入默认配置（如果不存在）
                 cursor.execute('''
                     INSERT OR IGNORE INTO dos_range_config 
-                    (config_name, min_dos_threshold, description, created_time, updated_time)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', ('default', 0.5, 'Default minimum DOS threshold for LCA processing', 
+                    (config_name, min_dos_threshold, shift_check_count, description, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', ('default', 0.5, 2, 'Default minimum DOS threshold and shift check count for LCA processing', 
                       datetime.now().isoformat(), datetime.now().isoformat()))
                 
                 conn.commit()
@@ -493,6 +500,85 @@ class DatabaseManager:
             self.logger.error(f"获取DOS阈值配置失败: {str(e)}")
             return 0.5
     
+    def get_shift_check_count(self, config_name: str = "default") -> int:
+        """
+        获取后续班次检查数量配置
+        
+        Args:
+            config_name: 配置名称，默认为'default'
+            
+        Returns:
+            检查班次数量，默认2
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT shift_check_count FROM dos_range_config 
+                    WHERE config_name = ? AND is_active = 1
+                ''', (config_name,))
+                
+                result = cursor.fetchone()
+                if result and result[0] is not None:
+                    return int(result[0])
+                else:
+                    # 如果未找到配置，返回默认值2并创建默认配置
+                    self._ensure_default_shift_check_config()
+                    return 2
+                    
+        except Exception as e:
+            self.logger.error(f"获取班次检查数量配置失败: {str(e)}")
+            return 2
+    
+    def set_shift_check_count(self, check_count: int, config_name: str = "default", 
+                             description: str = "") -> bool:
+        """
+        设置后续班次检查数量配置
+        
+        Args:
+            check_count: 检查班次数量
+            config_name: 配置名称
+            description: 配置描述
+            
+        Returns:
+            是否设置成功
+        """
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # 检查配置是否存在
+                cursor.execute('SELECT id FROM dos_range_config WHERE config_name = ?', (config_name,))
+                existing = cursor.fetchone()
+                
+                current_time = datetime.now().isoformat()
+                
+                if existing:
+                    # 更新现有配置
+                    cursor.execute('''
+                        UPDATE dos_range_config 
+                        SET shift_check_count = ?, description = ?, updated_time = ?
+                        WHERE config_name = ?
+                    ''', (check_count, description, current_time, config_name))
+                else:
+                    # 创建新配置（包含默认DOS阈值）
+                    cursor.execute('''
+                        INSERT INTO dos_range_config 
+                        (config_name, min_dos_threshold, shift_check_count, 
+                         description, created_time, updated_time)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (config_name, 0.5, check_count, description, 
+                          current_time, current_time))
+                
+                conn.commit()
+                self.logger.info(f"班次检查数量配置已更新: {config_name} = {check_count}")
+                return True
+                
+        except Exception as e:
+            error_msg = f"设置班次检查数量配置失败: {str(e)}"
+            self.logger.error(error_msg)
+            return False
+    
     def set_dos_threshold(self, min_threshold: float, config_name: str = "default", 
                          max_threshold: Optional[float] = None, description: str = "") -> bool:
         """
@@ -591,13 +677,28 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT OR IGNORE INTO dos_range_config 
-                    (config_name, min_dos_threshold, description, created_time, updated_time)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', ('default', 0.5, 'Default minimum DOS threshold for LCA processing', 
+                    (config_name, min_dos_threshold, shift_check_count, description, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', ('default', 0.5, 2, 'Default minimum DOS threshold and shift check count for LCA processing', 
                       datetime.now().isoformat(), datetime.now().isoformat()))
                 conn.commit()
         except Exception as e:
             self.logger.error(f"创建默认DOS配置失败: {str(e)}")
+    
+    def _ensure_default_shift_check_config(self):
+        """确保默认班次检查配置存在"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT OR IGNORE INTO dos_range_config 
+                    (config_name, min_dos_threshold, shift_check_count, description, created_time, updated_time)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', ('default', 0.5, 2, 'Default minimum DOS threshold and shift check count for LCA processing', 
+                      datetime.now().isoformat(), datetime.now().isoformat()))
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"创建默认班次检查配置失败: {str(e)}")
     
     def check_dos_threshold(self, dos_value: float, config_name: str = "default") -> Dict[str, Any]:
         """

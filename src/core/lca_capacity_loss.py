@@ -1110,6 +1110,11 @@ class LCACapacityLossProcessor:
                 compensation_calculation = self._calculate_compensation_production(
                     dos_value, threshold, dos_calculation, event_data
                 )
+                
+                # 步骤5：检查后续班次是否可以调整补偿
+                subsequent_shifts_check = self._check_subsequent_shifts_for_adjustment(
+                    event_data, compensation_calculation
+                )
             
             result = {
                 "status": "success",
@@ -1126,6 +1131,7 @@ class LCACapacityLossProcessor:
             # 如果需要补偿，添加补偿计算信息
             if not meets_threshold:
                 result["compensation_calculation"] = compensation_calculation
+                result["subsequent_shifts_check"] = subsequent_shifts_check
                 
             return result
             
@@ -1235,3 +1241,385 @@ class LCACapacityLossProcessor:
                 "message": error_msg,
                 "compensation_needed": 0
             }
+    
+    def _check_subsequent_shifts_for_adjustment(self, event_data: Dict[str, Any], 
+                                              compensation_calculation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        检查后续班次是否可以调整来补偿损失
+        
+        逻辑：从当前事件班次开始，查找后续班次（如3号T3后面的班次），
+        检查是否有可用的产能来补偿所需的产量
+        
+        Args:
+            event_data: 当前事件数据
+            compensation_calculation: 补偿产量计算结果
+            
+        Returns:
+            后续班次检查结果字典
+        """
+        try:
+            self.logger.info("🔍 步骤5: 检查后续班次调整可能性")
+            
+            # 获取补偿产量需求
+            if compensation_calculation.get("status") != "success":
+                return {
+                    "status": "skip",
+                    "message": "补偿产量计算失败，跳过后续班次检查",
+                    "available_shifts": [],
+                    "adjustment_possible": False
+                }
+            
+            compensation_needed = compensation_calculation.get("compensation_needed", 0)
+            if compensation_needed <= 0:
+                return {
+                    "status": "no_need",
+                    "message": "无需补偿，跳过后续班次检查",
+                    "available_shifts": [],
+                    "adjustment_possible": False
+                }
+            
+            # 获取当前事件信息
+            current_date = event_data.get("选择影响日期")
+            current_shift = event_data.get("选择影响班次")
+            target_line = event_data.get("选择产线")
+            
+            if not all([current_date, current_shift, target_line]):
+                return {
+                    "status": "error",
+                    "message": "事件信息不完整",
+                    "available_shifts": [],
+                    "adjustment_possible": False
+                }
+            
+            self.logger.info(f"需要补偿产量: {compensation_needed:.0f}")
+            self.logger.info(f"当前事件: {current_date} {current_shift} {target_line}")
+            
+            # 获取后续可用班次
+            subsequent_shifts = self._get_subsequent_shifts(current_date, current_shift)
+            
+            if not subsequent_shifts:
+                self.logger.info("❌ 无后续班次可调整")
+                return {
+                    "status": "no_shifts",
+                    "message": "无后续班次可用于调整",
+                    "available_shifts": [],
+                    "adjustment_possible": False
+                }
+            
+            # 检查每个后续班次的调整可能性
+            adjustment_options = self._evaluate_shift_adjustment_options(
+                subsequent_shifts, target_line, compensation_needed
+            )
+            
+            # 判断是否有可行的调整方案
+            has_viable_options = any(option["viable"] for option in adjustment_options)
+            
+            if has_viable_options:
+                self.logger.info("✅ 找到可调整的后续班次")
+                
+                # 检查前两个可调整班次是否有冲突事件
+                conflict_check = self._check_event_conflicts_in_next_shifts(
+                    adjustment_options, target_line
+                )
+                
+                return {
+                    "status": "adjustable",
+                    "message": "找到可调整的后续班次",
+                    "available_shifts": subsequent_shifts,
+                    "adjustment_options": adjustment_options,
+                    "adjustment_possible": True,
+                    "compensation_needed": compensation_needed,
+                    "conflict_check": conflict_check
+                }
+            else:
+                self.logger.info("❌ 后续班次无法满足补偿需求")
+                return {
+                    "status": "insufficient",
+                    "message": "后续班次无法满足补偿需求",
+                    "available_shifts": subsequent_shifts,
+                    "adjustment_options": adjustment_options,
+                    "adjustment_possible": False,
+                    "compensation_needed": compensation_needed
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"检查后续班次时出错: {str(e)}",
+                "available_shifts": [],
+                "adjustment_possible": False
+            }
+    
+    def _get_subsequent_shifts(self, current_date: str, current_shift: str) -> List[Dict[str, Any]]:
+        """
+        获取当前班次之后的后续班次列表
+        
+        Args:
+            current_date: 当前日期 (YYYY-MM-DD格式)
+            current_shift: 当前班次 (T1, T2, T3, T4)
+            
+        Returns:
+            后续班次列表，每个元素包含日期和班次信息
+        """
+        try:
+            # 获取Daily Plan数据以获取实际的日期和班次组合
+            daily_plan = self._get_daily_plan_with_shifts()
+            if daily_plan is None:
+                return []
+            
+            # 提取所有可用的日期-班次组合
+            available_shifts = self._extract_available_shifts(daily_plan)
+            
+            # 找到当前班次在可用班次列表中的位置
+            current_position = self._find_current_shift_position(available_shifts, current_date, current_shift)
+            if current_position == -1:
+                return []
+            
+            # 获取后续班次（当前班次之后的所有班次）
+            subsequent_shifts = []
+            total_shifts = len(available_shifts)
+            
+            # 限制检查后续班次数量（例如最多检查接下来的10个班次）
+            max_subsequent_shifts = 10
+            
+            for i in range(1, min(max_subsequent_shifts + 1, total_shifts - current_position)):
+                pos = current_position + i
+                if pos < total_shifts:
+                    shift_info = available_shifts[pos]
+                    subsequent_shifts.append({
+                        "date": shift_info["date"],
+                        "shift": shift_info["shift"],
+                        "datetime": shift_info["datetime"],
+                        "position": pos,
+                        "sequence": i  # 第几个后续班次
+                    })
+            
+            self.logger.info(f"找到 {len(subsequent_shifts)} 个后续班次")
+            
+            return subsequent_shifts
+            
+        except Exception:
+            return []
+    
+    def _evaluate_shift_adjustment_options(self, subsequent_shifts: List[Dict[str, Any]], 
+                                         target_line: str, compensation_needed: float) -> List[Dict[str, Any]]:
+        """
+        评估每个后续班次的调整可能性
+        
+        Args:
+            subsequent_shifts: 后续班次列表
+            target_line: 目标产线
+            compensation_needed: 需要补偿的产量
+            
+        Returns:
+            每个班次的调整评估结果列表
+        """
+        adjustment_options = []
+        
+        try:
+            for shift_info in subsequent_shifts:
+                date = shift_info["date"]
+                shift = shift_info["shift"]
+                sequence = shift_info.get("sequence", 0)
+                
+                # 获取该班次在目标产线的计划产量
+                planned_production = self._get_forecast_value(date, shift, target_line)
+                
+                # 简单的可行性评估逻辑
+                # 假设如果该班次有计划产量，就有调整的可能性
+                viable = planned_production > 0
+                potential_adjustment = min(planned_production * 0.2, compensation_needed) if viable else 0  # 假设最多可调整20%
+                
+                option = {
+                    "date": date,
+                    "shift": shift,
+                    "sequence": sequence,
+                    "planned_production": planned_production,
+                    "viable": viable,
+                    "potential_adjustment": potential_adjustment,
+                    "adjustment_ratio": potential_adjustment / compensation_needed if compensation_needed > 0 else 0
+                }
+                
+                adjustment_options.append(option)
+                
+                self.logger.info(f"  {date} {shift}: 计划{planned_production:.0f}, 可调整{potential_adjustment:.0f} {'✅' if viable else '❌'}")
+            
+            return adjustment_options
+            
+        except Exception:
+            return []
+    
+    def _check_event_conflicts_in_next_shifts(self, adjustment_options: List[Dict[str, Any]], 
+                                            target_line: str) -> Dict[str, Any]:
+        """
+        检查前N个可调整班次的事件数量
+        
+        检查的事件类型：
+        1. LCA/Manual Rework计划
+        2. RecycleHGA  
+        3. PM
+        
+        Args:
+            adjustment_options: 调整选项列表
+            target_line: 目标产线（保留参数以备将来使用）
+            
+        Returns:
+            事件数量检查结果字典
+        """
+        try:
+            # 获取配置的检查班次数量
+            check_count = self.db_manager.get_shift_check_count()
+            self.logger.info(f"🔍 检查前{check_count}班次事件数量")
+            
+            # 获取前N个可调整的班次
+            viable_shifts = [opt for opt in adjustment_options if opt["viable"]][:check_count]
+            
+            if not viable_shifts:
+                return {
+                    "status": "no_shifts",
+                    "message": "无可调整班次需要检查",
+                    "conflict_shifts": [],
+                    "has_conflicts": False
+                }
+            
+            # 获取Daily Plan数据
+            daily_plan = self._get_daily_plan_with_shifts()
+            if daily_plan is None:
+                return {
+                    "status": "error",
+                    "message": "无法获取Daily Plan数据",
+                    "conflict_shifts": [],
+                    "has_conflicts": False
+                }
+            
+            conflict_results = []
+            
+            for shift_opt in viable_shifts:
+                date = shift_opt["date"]
+                shift = shift_opt["shift"]
+                
+                # 检查该班次的事件数量
+                event_count = self._count_events_in_shift(
+                    daily_plan, date, shift
+                )
+                
+                event_info = {
+                    "date": date,
+                    "shift": shift,
+                    "sequence": shift_opt.get("sequence", 0),
+                    "planned_production": shift_opt.get("planned_production", 0),
+                    "event_count": event_count,
+                    "has_events": event_count > 0
+                }
+                
+                conflict_results.append(event_info)
+                
+                # 输出检查结果
+                self.logger.info(f"  {date} {shift}: 事件数量 {event_count}")
+            
+            # 判断是否有任何事件
+            has_any_events = any(result["has_events"] for result in conflict_results)
+            
+            return {
+                "status": "success",
+                "message": f"检查了{len(viable_shifts)}个班次的事件数量",
+                "checked_shifts": conflict_results,
+                "has_events": has_any_events,
+                "check_count": check_count
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"检查事件数量时出错: {str(e)}",
+                "checked_shifts": [],
+                "has_events": False
+            }
+    
+    def _count_events_in_shift(self, daily_plan: pd.DataFrame, 
+                             date: str, shift: str) -> int:
+        """
+        统计指定班次的事件数量
+        
+        Args:
+            daily_plan: Daily Plan DataFrame
+            date: 日期
+            shift: 班次
+            
+        Returns:
+            事件数量
+        """
+        event_count = 0
+        
+        try:
+            # 目标事件类型
+            target_event_types = [
+                "LCA", "Manual", "Recycle HGA", "PM"
+            ]
+            
+            # 找到目标日期和班次对应的列
+            target_column = None
+            for col in daily_plan.columns:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    date_obj = col[0]
+                    col_shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = self._format_date_from_column(date_obj)
+                    
+                    if formatted_date == date and col_shift == shift:
+                        target_column = col
+                        break
+            
+            if target_column is None:
+                return event_count
+            
+            # 检查Line列中的事件类型
+            line_column = daily_plan.columns[0]
+            
+            for idx, row in daily_plan.iterrows():
+                line_value = row[line_column]
+                
+                if pd.notna(line_value):
+                    line_str = str(line_value).strip()
+                    
+                    # 检查是否包含目标事件类型
+                    for event_type in target_event_types:
+                        if event_type in line_str:
+                            # 检查该事件在目标班次是否有数值
+                            event_value = row[target_column]
+                            
+                            if pd.notna(event_value) and event_value != 0:
+                                event_count += 1
+                                break  # 避免同一行重复计数
+            
+            return event_count
+            
+        except Exception:
+            return event_count
+    
+    def _format_date_from_column(self, date_obj) -> str:
+        """
+        从列对象中格式化日期
+        
+        Args:
+            date_obj: 列中的日期对象
+            
+        Returns:
+            格式化后的日期字符串 (YYYY-MM-DD)
+        """
+        try:
+            if hasattr(date_obj, 'strftime'):
+                return date_obj.strftime('%Y-%m-%d')
+            elif isinstance(date_obj, str) and '-' in date_obj:
+                day, month = date_obj.split('-')
+                month_map = {
+                    'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                    'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
+                    'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                }
+                if month in month_map:
+                    return f"2025-{month_map[month]}-{day.zfill(2)}"
+            return ""
+        except Exception:
+            return ""
