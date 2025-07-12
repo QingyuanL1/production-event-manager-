@@ -38,7 +38,7 @@ def get_module_logger(module_name: str) -> logging.Logger:
     logger_mapping = {
         'lca_capacity_loss': LoggerFactory.get_lca_logger(),
         'event_manager': LoggerFactory.get_event_logger(),
-        'data_loader': LoggerFactory.get_data_loader(),
+        'data_loader': LoggerFactory.get_data_logger(),
         'main_ui': LoggerFactory.get_system_logger(),
         'database_manager': LoggerFactory.get_system_logger()
     }
