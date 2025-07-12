@@ -1425,8 +1425,8 @@ class LCACapacityLossProcessor:
                 shift = shift_info["shift"]
                 sequence = shift_info.get("sequence", 0)
                 
-                # 获取该班次在目标产线的计划产量
-                planned_production = self._get_forecast_value(date, shift, target_line)
+                # 获取该班次在目标产线的安排产量（从产线行直接获取）
+                planned_production = self._get_line_planned_production(date, shift, target_line)
                 
                 # 修正逻辑：如果班次已有安排产量，则不可调整，跳过寻找下一个
                 # 只有没有安排产量的班次才可以用于补偿调整
@@ -1711,3 +1711,57 @@ class LCACapacityLossProcessor:
             return ""
         except Exception:
             return ""
+    
+    def _get_line_planned_production(self, date: str, shift: str, target_line: str) -> float:
+        """
+        获取指定产线在指定班次的安排产量（直接从产线行获取）
+        
+        Args:
+            date: 日期字符串 (YYYY-MM-DD格式)
+            shift: 班次 (T1, T2, T3, T4)
+            target_line: 目标产线
+            
+        Returns:
+            该产线在该班次的安排产量，如果没有安排则返回0
+        """
+        try:
+            # 获取Daily Plan数据
+            df_with_shifts = self._get_daily_plan_with_shifts()
+            if df_with_shifts is None:
+                return 0.0
+            
+            # 找到目标日期和班次对应的列
+            target_column = None
+            line_column = df_with_shifts.columns[0]
+            
+            for col in df_with_shifts.columns[1:]:
+                if isinstance(col, tuple) and len(col) >= 3:
+                    date_obj = col[0]
+                    col_shift = col[2]
+                    
+                    # 处理日期格式转换
+                    formatted_date = self._format_date_from_column(date_obj)
+                    
+                    if formatted_date == date and col_shift == shift:
+                        target_column = col
+                        break
+            
+            if target_column is None:
+                return 0.0
+            
+            # 找到目标产线行，直接获取安排产量
+            for idx, row in df_with_shifts.iterrows():
+                line_value = row[line_column]
+                if pd.notna(line_value) and target_line in str(line_value):
+                    # 从产线行获取该班次的安排产量
+                    production_value = row[target_column]
+                    if pd.notna(production_value):
+                        return float(production_value)
+                    else:
+                        return 0.0
+            
+            return 0.0
+            
+        except Exception as e:
+            self.logger.error(f"获取产线安排产量失败: {str(e)}")
+            return 0.0
