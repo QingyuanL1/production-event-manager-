@@ -32,7 +32,8 @@ class LoggerFactory:
     def get_logger(cls, name: str, 
                    level: int = logging.INFO,
                    file_logging: bool = True,
-                   console_logging: bool = True) -> logging.Logger:
+                   console_logging: bool = True,
+                   unified_log: bool = True) -> logging.Logger:
         """
         获取或创建日志记录器
         
@@ -41,6 +42,7 @@ class LoggerFactory:
             level: 日志级别
             file_logging: 是否启用文件日志
             console_logging: 是否启用控制台日志
+            unified_log: 是否使用统一日志文件
             
         Returns:
             配置好的日志记录器
@@ -55,23 +57,27 @@ class LoggerFactory:
         # 清除现有的处理器
         logger.handlers.clear()
         
-        # 创建自定义格式器
-        formatter = CustomFormatter()
+        # 创建自定义格式器，包含模块信息
+        from .log_formatter import UnifiedFormatter
+        formatter = UnifiedFormatter(include_module=True) if unified_log else CustomFormatter()
         
         # 添加控制台处理器
         if console_logging:
             console_handler = logging.StreamHandler()
             console_handler.setLevel(level)
-            console_handler.setFormatter(formatter)
+            console_handler.setFormatter(CustomFormatter())  # 控制台仍使用原格式
             logger.addHandler(console_handler)
         
         # 添加文件处理器
         if file_logging:
             cls.setup_log_directory()
             
-            # 创建日期格式的文件名
+            # 根据unified_log决定文件名
             date_str = datetime.now().strftime("%Y-%m-%d")
-            log_file = os.path.join(cls._log_dir, f"{name}_{date_str}.log")
+            if unified_log:
+                log_file = os.path.join(cls._log_dir, f"system_{date_str}.log")
+            else:
+                log_file = os.path.join(cls._log_dir, f"{name}_{date_str}.log")
             
             file_handler = logging.FileHandler(log_file, encoding='utf-8')
             file_handler.setLevel(level)

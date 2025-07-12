@@ -128,3 +128,93 @@ class StructuredFormatter(logging.Formatter):
                 log_data[key] = value
         
         return json.dumps(log_data, ensure_ascii=False)
+
+
+class UnifiedFormatter(logging.Formatter):
+    """统一日志格式化器，在统一日志文件中显示模块信息"""
+    
+    # 日志级别emoji映射
+    EMOJIS = {
+        'DEBUG': '🔍',
+        'INFO': 'ℹ️',
+        'WARNING': '⚠️',
+        'ERROR': '❌',
+        'CRITICAL': '🚨'
+    }
+    
+    def __init__(self, include_module: bool = True, use_emojis: bool = True):
+        """
+        初始化统一格式化器
+        
+        Args:
+            include_module: 是否包含模块名称
+            use_emojis: 是否使用emoji
+        """
+        super().__init__()
+        self.include_module = include_module
+        self.use_emojis = use_emojis
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """
+        格式化日志记录，包含模块信息
+        
+        Args:
+            record: 日志记录对象
+            
+        Returns:
+            格式化后的日志字符串
+        """
+        # 获取时间戳
+        timestamp = datetime.fromtimestamp(record.created).strftime('%H:%M:%S')
+        
+        # 获取日志级别
+        level = record.levelname
+        
+        # 获取模块名称
+        module_name = self._get_module_display_name(record.name)
+        
+        # 获取消息
+        message = record.getMessage()
+        
+        # 构建格式
+        if self.use_emojis and level in self.EMOJIS:
+            emoji = self.EMOJIS[level]
+            if self.include_module:
+                log_parts = [f"[{timestamp}]", emoji, f"{level}:", f"[{module_name}]", message]
+            else:
+                log_parts = [f"[{timestamp}]", emoji, f"{level}:", message]
+        else:
+            if self.include_module:
+                log_parts = [f"[{timestamp}]", f"{level}:", f"[{module_name}]", message]
+            else:
+                log_parts = [f"[{timestamp}]", f"{level}:", message]
+        
+        # 如果有异常信息，添加到日志中
+        if record.exc_info:
+            exc_text = self.formatException(record.exc_info)
+            log_parts.append(f"\n{exc_text}")
+        
+        return " ".join(log_parts)
+    
+    def _get_module_display_name(self, logger_name: str) -> str:
+        """
+        获取用于显示的模块名称
+        
+        Args:
+            logger_name: 日志记录器名称
+            
+        Returns:
+            简化的模块显示名称
+        """
+        # 模块名称映射
+        name_mapping = {
+            'lca_processor': 'LCA',
+            'lca_capacity_loss': 'LCA',
+            'event_manager': 'EVENT',
+            'system': 'SYS',
+            'data_loader': 'DATA',
+            'main_ui': 'UI',
+            'database_manager': 'DB'
+        }
+        
+        return name_mapping.get(logger_name, logger_name.upper()[:6])

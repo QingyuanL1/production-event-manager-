@@ -7,6 +7,6 @@ Logging Utilities Package
 
 from .logger_factory import LoggerFactory
 from .log_analyzer import LogAnalyzer
-from .log_formatter import CustomFormatter
+from .log_formatter import CustomFormatter, UnifiedFormatter
 
-__all__ = ['LoggerFactory', 'LogAnalyzer', 'CustomFormatter']
+__all__ = ['LoggerFactory', 'LogAnalyzer', 'CustomFormatter', 'UnifiedFormatter']
