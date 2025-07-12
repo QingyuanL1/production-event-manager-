@@ -1509,7 +1509,7 @@ class LCACapacityLossProcessor:
                 
                 # 检查该班次的事件信息（数量和类型）
                 event_info_result = self._count_events_in_shift(
-                    daily_plan, date, shift
+                    daily_plan, date, shift, target_line
                 )
                 
                 event_info = {
@@ -1575,14 +1575,15 @@ class LCACapacityLossProcessor:
             }
     
     def _count_events_in_shift(self, daily_plan: pd.DataFrame, 
-                             date: str, shift: str) -> Dict[str, Any]:
+                             date: str, shift: str, target_line: str = "") -> Dict[str, Any]:
         """
-        统计指定班次的事件信息（数量和类型）
+        统计指定班次在指定产线范围内的事件信息（数量和类型）
         
         Args:
             daily_plan: Daily Plan DataFrame
             date: 日期
             shift: 班次
+            target_line: 目标产线，用于限定检查范围
             
         Returns:
             事件信息字典，包含数量和类型列表
@@ -1613,11 +1614,44 @@ class LCACapacityLossProcessor:
             if target_column is None:
                 return {"count": 0, "types": [], "details": []}
             
-            # 检查Line列中的事件类型
+            # 检查Line列中的事件类型，但只检查指定产线范围内的事件
             line_column = daily_plan.columns[0]
             event_details = []
             
-            for row_idx, row in daily_plan.iterrows():
+            # 如果指定了目标产线，找到该产线在表格中的行范围
+            target_line_start = None
+            target_line_end = None
+            
+            if target_line:
+                for idx, row in daily_plan.iterrows():
+                    line_value = row[line_column]
+                    if pd.notna(line_value):
+                        line_str = str(line_value).strip()
+                        
+                        # 找到目标产线的开始行
+                        if target_line in line_str and target_line_start is None:
+                            target_line_start = idx
+                        
+                        # 找到下一个产线的开始行作为结束边界
+                        elif target_line_start is not None and any(f"F{i}" in line_str for i in range(10, 50)):
+                            # 如果发现其他F系列产线，说明当前产线范围结束
+                            if target_line not in line_str:
+                                target_line_end = idx
+                                break
+                
+                # 如果没找到结束边界，搜索到表格末尾
+                if target_line_start is not None and target_line_end is None:
+                    target_line_end = len(daily_plan)
+            
+            # 只在指定产线范围内搜索事件
+            search_start = target_line_start if target_line_start is not None else 0
+            search_end = target_line_end if target_line_end is not None else len(daily_plan)
+            
+            for idx in range(search_start, search_end):
+                if idx >= len(daily_plan):
+                    break
+                    
+                row = daily_plan.iloc[idx]
                 line_value = row[line_column]
                 
                 if pd.notna(line_value):
