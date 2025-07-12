@@ -1551,7 +1551,7 @@ class LCACapacityLossProcessor:
             # 判断是否有任何事件
             has_any_events = any(result["has_events"] for result in conflict_results)
             
-            # 输出详细的事件检查结果
+            # 输出详细的事件检查结果并计算可抵偿产量
             shifts_with_events = sum(1 for result in conflict_results if result["has_events"])
             
             # 汇总所有事件类型
@@ -1562,18 +1562,28 @@ class LCACapacityLossProcessor:
             if shifts_with_events == 0:
                 self.logger.info(f"后续{len(viable_shifts)}班次均无事件")
             else:
-                self.logger.info(f"后续{len(viable_shifts)}班次事件情况:")
+                self.logger.info(f"后续{len(viable_shifts)}班次中{shifts_with_events}班次有事件")
                 
-                # 输出每个班次的事件情况（有事件的班次）
+                # 计算每个班次的事件可抵偿产量
                 for result in conflict_results:
                     if result["has_events"]:
                         date = result["date"]
                         shift = result["shift"]
                         event_types = result.get("event_types", [])
+                        planned_production = result.get("planned_production", 0)
+                        
+                        # 计算该班次事件的可抵偿产量
+                        compensation_by_events = self._calculate_event_compensation_capacity(
+                            date, shift, target_line, event_types, planned_production
+                        )
+                        
+                        # 更新结果中的抵偿信息
+                        result["compensation_capacity"] = compensation_by_events
                         
                         if event_types:
                             types_str = ', '.join(event_types)
-                            self.logger.info(f"  {date} {shift}: {types_str}")
+                            total_compensation = sum(compensation_by_events.values())
+                            self.logger.info(f"  {date} {shift}: {types_str} (可抵偿{total_compensation:.0f})")
                         else:
                             self.logger.info(f"  {date} {shift}: 有事件")
             
@@ -1704,6 +1714,104 @@ class LCACapacityLossProcessor:
             
         except Exception:
             return {"count": 0, "types": [], "details": []}
+    
+    def _calculate_event_compensation_capacity(self, date: str, shift: str, 
+                                             target_line: str, event_types: List[str], 
+                                             planned_production: float) -> Dict[str, float]:
+        """
+        计算不同事件类型的可抵偿产量
+        
+        Args:
+            date: 日期
+            shift: 班次
+            target_line: 目标产线
+            event_types: 事件类型列表
+            planned_production: 计划产量
+            
+        Returns:
+            各事件类型的可抵偿产量字典
+        """
+        compensation_by_events = {}
+        
+        try:
+            # 获取产线总产能 (假设从capacity数据或固定值获取)
+            line_capacity = self._get_line_capacity(target_line)
+            
+            # 添加调试信息
+            self.logger.info(f"抵偿产量计算 - 产线{target_line}总产能: {line_capacity}, 计划产量: {planned_production}")
+            
+            for event_type in event_types:
+                if event_type in ["LCA", "Manual"]:
+                    # LCA/Manual Rework: 按产线空余产能计算
+                    spare_capacity = max(0, line_capacity - planned_production)
+                    compensation_by_events[event_type] = spare_capacity
+                    self.logger.info(f"  {event_type}事件: 空余产能 = {line_capacity} - {planned_production} = {spare_capacity}")
+                    
+                elif "Recycle" in event_type or "HGA" in event_type:
+                    # Recycle HGA: 按产线空余产能计算  
+                    spare_capacity = max(0, line_capacity - planned_production)
+                    compensation_by_events[event_type] = spare_capacity
+                    self.logger.info(f"  {event_type}事件: 空余产能 = {line_capacity} - {planned_production} = {spare_capacity}")
+                    
+                elif event_type == "PM":
+                    # PM: 固定占用2小时，按比例计算 (2/11 × 总产量)
+                    pm_compensation = (2.0 / 11.0) * planned_production
+                    compensation_by_events[event_type] = pm_compensation
+                    self.logger.info(f"  {event_type}事件: 2小时抵偿 = 2/11 × {planned_production} = {pm_compensation:.0f}")
+                    
+                else:
+                    # 其他未知事件类型，暂时设为0
+                    compensation_by_events[event_type] = 0.0
+                    self.logger.info(f"  {event_type}事件: 未知类型，设为0")
+            
+            return compensation_by_events
+            
+        except Exception as e:
+            self.logger.error(f"计算事件抵偿产量失败: {str(e)}")
+            return {event_type: 0.0 for event_type in event_types}
+    
+    def _get_line_capacity(self, target_line: str) -> float:
+        """
+        获取产线总产能
+        
+        Args:
+            target_line: 目标产线
+            
+        Returns:
+            产线总产能，默认7000
+        """
+        try:
+            # 尝试从capacity数据获取
+            capacity_data = self.data_loader.get_data("capacity")
+            if capacity_data is not None:
+                # 查找目标产线的产能信息
+                for idx, row in capacity_data.iterrows():
+                    if target_line in str(row.iloc[0]):  # 假设第一列是产线名称
+                        # 查找产能相关的列
+                        for col in capacity_data.columns:
+                            if "capacity" in str(col).lower() or "产能" in str(col):
+                                capacity_value = row[col]
+                                if pd.notna(capacity_value) and capacity_value > 0:
+                                    return float(capacity_value)
+            
+            # 如果没有找到capacity数据，使用默认值
+            # 可以根据产线类型设置不同的默认值
+            default_capacities = {
+                "F16": 6000,
+                "F25": 7000, 
+                "F29": 8000,
+                "F32": 7500
+            }
+            
+            for line_code, capacity in default_capacities.items():
+                if line_code in target_line:
+                    return capacity
+            
+            # 通用默认值
+            return 7000.0
+            
+        except Exception:
+            return 7000.0
     
     def _format_date_from_column(self, date_obj) -> str:
         """
