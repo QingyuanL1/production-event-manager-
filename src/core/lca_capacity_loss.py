@@ -1537,24 +1537,23 @@ class LCACapacityLossProcessor:
             for result in conflict_results:
                 all_event_types.update(result.get("event_types", []))
             
-            self.logger.info(f"事件检查结果: {shifts_with_events}/{len(viable_shifts)}班次有事件, 总事件数{total_events}")
-            
-            if all_event_types:
-                self.logger.info(f"发现事件类型: {', '.join(sorted(all_event_types))}")
-            
-            # 输出每个有事件的班次详情
-            for result in conflict_results:
-                if result["has_events"]:
-                    date = result["date"]
-                    shift = result["shift"]
-                    event_types = result.get("event_types", [])
-                    event_count = result.get("event_count", 0)
-                    
-                    if event_types:
-                        types_str = ', '.join(event_types)
-                        self.logger.info(f"  {date} {shift}: {event_count}个事件 [{types_str}]")
-                    else:
-                        self.logger.info(f"  {date} {shift}: {event_count}个事件")
+            if shifts_with_events == 0:
+                self.logger.info(f"后续{len(viable_shifts)}班次均无事件")
+            else:
+                self.logger.info(f"后续{len(viable_shifts)}班次事件情况:")
+                
+                # 输出每个班次的事件情况（有事件的班次）
+                for result in conflict_results:
+                    if result["has_events"]:
+                        date = result["date"]
+                        shift = result["shift"]
+                        event_types = result.get("event_types", [])
+                        
+                        if event_types:
+                            types_str = ', '.join(event_types)
+                            self.logger.info(f"  {date} {shift}: {types_str}")
+                        else:
+                            self.logger.info(f"  {date} {shift}: 有事件")
             
             return {
                 "status": "success",
