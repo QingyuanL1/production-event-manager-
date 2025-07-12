@@ -1428,10 +1428,10 @@ class LCACapacityLossProcessor:
                 # 获取该班次在目标产线的计划产量
                 planned_production = self._get_forecast_value(date, shift, target_line)
                 
-                # 简单的可行性评估逻辑
-                # 假设如果该班次有计划产量，就有调整的可能性
-                viable = planned_production > 0
-                potential_adjustment = min(planned_production * 0.2, compensation_needed) if viable else 0  # 假设最多可调整20%
+                # 修正逻辑：如果班次已有安排产量，则不可调整，跳过寻找下一个
+                # 只有没有安排产量的班次才可以用于补偿调整
+                viable = planned_production == 0  # 只有没有安排产量的班次才可调整
+                potential_adjustment = compensation_needed if viable else 0  # 如果可调整，可以安排全部补偿产量
                 
                 option = {
                     "date": date,
@@ -1449,8 +1449,11 @@ class LCACapacityLossProcessor:
                     viable_count += 1
                     total_potential_adjustment += potential_adjustment
             
-            # 只输出汇总信息
-            self.logger.info(f"后续班次评估: {viable_count}/{len(subsequent_shifts)}班次可调整, 总潜在调整量{total_potential_adjustment:.0f}")
+            # 输出汇总信息和详细分析
+            if viable_count > 0:
+                self.logger.info(f"后续班次评估: {viable_count}/{len(subsequent_shifts)}班次可调整 (空闲班次)")
+            else:
+                self.logger.info(f"后续班次评估: {len(subsequent_shifts)}班次均已有安排产量，无可调整班次")
             
             return adjustment_options
             
