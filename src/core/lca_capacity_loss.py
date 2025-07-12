@@ -12,6 +12,13 @@ from typing import Dict, List, Any, Tuple, Optional
 import logging
 import os
 
+# 导入新的日志包
+try:
+    from ..utils.logging.integration import get_module_logger, log_lca_event_start, log_lca_event_complete
+    USE_NEW_LOGGING = True
+except ImportError:
+    USE_NEW_LOGGING = False
+
 
 class LCACapacityLossProcessor:
     """
@@ -30,7 +37,14 @@ class LCACapacityLossProcessor:
             logger: 日志记录器
         """
         self.data_loader = data_loader
-        self.logger = logger or logging.getLogger(__name__)
+        
+        # 使用新的日志系统或回退到默认
+        if USE_NEW_LOGGING:
+            self.logger = get_module_logger('lca_capacity_loss')
+            self.logger.info("🎯 LCA处理器启动 - 使用新日志系统")
+        else:
+            self.logger = logger or logging.getLogger(__name__)
+            self.logger.info("⚠️ LCA处理器启动 - 使用默认日志系统")
         
         # 初始化数据库管理器用于DOS阈值检查
         from .database_manager import DatabaseManager
@@ -46,7 +60,12 @@ class LCACapacityLossProcessor:
         Returns:
             处理结果字典
         """
-        self.logger.info("🚀 **LCA产能损失事件处理**")
+        # 使用新日志系统记录事件开始
+        if USE_NEW_LOGGING:
+            event_id = event_data.get('event_id', 'UNKNOWN')
+            log_lca_event_start(event_id, event_data)
+        
+        self.logger.info("🚀 LCA产能损失事件处理")
         self.logger.info(f"事件: {event_data.get('选择影响日期')} {event_data.get('选择影响班次')} {event_data.get('选择产线')}")
         
         try:
